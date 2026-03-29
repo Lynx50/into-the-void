@@ -1,0 +1,152 @@
+Upgrade my existing app "Into the Void" to make it feel less like a static interface and more like a calm emotional experience.
+
+MAIN GOAL:
+Improve the bubble system, especially on the Home screen and My Orbit screen, so the app feels alive, interactive, and immersive.
+
+==================================================
+1. HOME SCREEN BACKGROUND BUBBLES
+==================================================
+
+Add more floating background bubbles to the home screen.
+
+Requirements:
+- Show 8 to 15 background bubbles at a time
+- Use different sizes
+- Use very low opacity so they stay subtle
+- Make them drift slowly in different directions
+- Add slight blur / glow so they feel soft
+- Keep them behind all main UI elements
+- Movement should be calming, not distracting
+
+Important:
+The bubbles should feel atmospheric, not decorative.
+They should be felt more than noticed.
+
+==================================================
+2. TAGLINE UPDATE
+==================================================
+
+Change the home screen tagline text to:
+
+"Let it go… see what’s out there."
+
+Style:
+- Small
+- Soft
+- Elegant
+- Slight transparency
+- Centered under the title
+
+==================================================
+3. MY ORBIT - BUBBLE EXPERIENCE REDESIGN
+==================================================
+
+Completely redesign My Orbit so it no longer shows thought text by default.
+
+NEW DEFAULT STATE:
+- Show only floating bubbles
+- Do NOT show message text inside the bubbles at first
+- Bubbles should vary in size based on engagement / reactions
+- Bubbles drift slowly in place
+- Add subtle glow
+- Spread bubbles nicely across the screen so the space does not feel empty
+
+Interaction:
+- When user taps a bubble, it should expand slightly
+- Then animate like a soft pop or reveal
+- After tapping, show the full thought in an overlay, modal, or centered reveal card
+- In that reveal, show:
+  - Full thought text
+  - Mood icon if available
+  - Heart count
+  - Think count
+  - Optional "Seen X times"
+
+After closing:
+- Return to the floating bubble view
+
+Important:
+My Orbit should feel like exploring floating memories, not reading a list or dashboard.
+
+==================================================
+4. ORBIT BUBBLE DETAILS
+==================================================
+
+For My Orbit bubbles:
+- Use different sizes based on engagement:
+  - more reactions = slightly bigger bubble
+- Add very slow floating animation
+- Add small random movement so bubbles do not feel frozen
+- Prevent bubbles from overlapping badly
+- Keep layout elegant and spacious
+
+Optional:
+- Add faint connecting glow lines only if they look beautiful and minimal
+- Remove them if they make the screen feel busy
+
+==================================================
+5. HOME SCREEN RECEIVE BUTTON IMPROVEMENT
+==================================================
+
+Keep the Receive button as the emotional center of the home screen.
+
+Improve it by:
+- Adding a soft pulsing glow
+- Adding a gentle ripple or aura effect
+- Making it feel inviting and alive
+- Keeping animation slow and calming
+
+Above it, keep:
+"A thought is waiting for you..."
+
+Below it, keep:
+"3 / 3 receives remaining today"
+
+==================================================
+6. MAKE THE APP FEEL MORE EMOTIONAL
+==================================================
+
+Reduce the feeling of a static UI.
+
+Across the app:
+- Prioritize smooth transitions
+- Use gentle fade-ins and fade-outs
+- Use soft scaling on tap
+- Make interactions feel light and calming
+- Avoid harsh movement, sudden pops, or game-like energy
+
+The app should feel:
+- calm
+- reflective
+- slightly mysterious
+- emotionally gentle
+
+==================================================
+7. IMPORTANT DESIGN RULES
+==================================================
+
+Do NOT add:
+- comments
+- replies
+- chat
+- profiles
+- social media features
+- cluttered text everywhere
+
+Do keep:
+- minimal design
+- emotional tone
+- slow animation
+- floating space atmosphere
+
+==================================================
+8. FINAL OUTCOME
+==================================================
+
+The result should make the app feel less like a cool interface and more like:
+"a quiet place where thoughts drift, wait, and return."
+
+Focus especially on:
+- more atmospheric bubbles on Home
+- better Receive button presence
+- making My Orbit feel magical and personal
