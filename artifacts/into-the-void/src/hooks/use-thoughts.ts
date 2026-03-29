@@ -5,10 +5,12 @@ import {
   useGetMyThoughts as useGeneratedGetMyThoughts,
   useGetReceiveCount as useGeneratedGetReceiveCount,
   useReactToThought as useGeneratedReactToThought,
+  receiveThought,
   getGetMyThoughtsQueryKey,
   getGetReceiveCountQueryKey,
 } from "@workspace/api-client-react";
 import { useUser } from "./use-user";
+import { getRandomSeedThought } from "@/data/seedThoughts";
 
 export { useUser };
 
@@ -49,6 +51,19 @@ export function useReceiveThought() {
 
   return useGeneratedReceiveThought({
     mutation: {
+      mutationFn: async ({ data }: { data: { userId: string } }) => {
+        try {
+          return await receiveThought(data);
+        } catch (err) {
+          // 404 means the server has no eligible thoughts — serve a local fallback.
+          // All other errors (403 no submission yet, 429 daily limit, etc.) re-throw
+          // so existing error handling in the UI continues to work normally.
+          if ((err as { status?: number })?.status === 404) {
+            return getRandomSeedThought();
+          }
+          throw err;
+        }
+      },
       onSuccess: () => {
         if (userId) {
           queryClient.invalidateQueries({ queryKey: getGetReceiveCountQueryKey({ userId }) });
