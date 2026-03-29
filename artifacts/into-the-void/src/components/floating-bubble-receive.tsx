@@ -1,10 +1,17 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Heart, Brain } from "lucide-react";
 import { ReceivedThought } from "@workspace/api-client-react";
 import { MoodIcon } from "./mood-icon";
 import { useReactToThought, useUser } from "@/hooks/use-thoughts";
 import { cn } from "@/lib/utils";
+
+const WHISPERS = [
+  "You're not alone.",
+  "Someone else felt this too.",
+  "Another mind, same thought.",
+  "This came from someone like you.",
+];
 
 // ─── Phase machine ─────────────────────────────────────────────────────────────
 // arriving  → bubble drifts in from above
@@ -28,6 +35,8 @@ export function FloatingBubbleReceive({ thought, onClose, onReceiveAnother }: Pr
   const [phase, setPhase] = useState<Phase>("arriving");
   const [reacted, setReacted] = useState<"felt_this" | "made_think" | null>(null);
   const [reported, setReported] = useState(false);
+  const [textArrived, setTextArrived] = useState(false);
+  const whisper = useMemo(() => WHISPERS[Math.floor(Math.random() * WHISPERS.length)], []);
 
   const isBubble = phase === "arriving" || phase === "waiting" || phase === "tapping";
   const isExpanding = phase === "expanding";
@@ -317,24 +326,65 @@ export function FloatingBubbleReceive({ thought, onClose, onReceiveAnother }: Pr
                 </motion.div>
               )}
 
-              {/* Thought text — blur-to-sharp fade */}
+              {/* Thought text — blur-to-sharp fade + breathing glow behind it */}
+              <div className="flex-1 flex items-center justify-center relative">
+                {/* Breathing reading glow — very soft, pulses slowly */}
+                <motion.div
+                  className="absolute pointer-events-none"
+                  style={{
+                    inset: "-40%",
+                    borderRadius: "50%",
+                    background: "radial-gradient(circle, rgba(140,100,255,0.14) 0%, transparent 66%)",
+                    filter: "blur(22px)",
+                  }}
+                  animate={{ opacity: isCard ? [0.0, 0.9, 0.4, 0.9, 0.0] : 0 }}
+                  transition={{ delay: 0.6, duration: 6.5, repeat: Infinity, ease: "easeInOut" }}
+                />
+
+                {/* Arrival glow bloom — brief flash when text completes */}
+                <motion.div
+                  className="absolute pointer-events-none"
+                  style={{
+                    inset: "-28%",
+                    borderRadius: "50%",
+                    background: "radial-gradient(circle, rgba(200,170,255,0.28) 0%, transparent 62%)",
+                    filter: "blur(18px)",
+                  }}
+                  animate={{ opacity: textArrived ? [0, 0.28, 0] : 0 }}
+                  transition={{ duration: 1.5, ease: "easeOut" }}
+                />
+
+                <motion.p
+                  animate={{
+                    opacity: isCard ? 1 : 0,
+                    y: isCard ? 0 : 10,
+                    filter: isCard ? "blur(0px)" : "blur(5px)",
+                  }}
+                  transition={{ delay: 0.48, duration: 1.15, ease: "easeOut" }}
+                  onAnimationComplete={() => {
+                    if (isCard && !textArrived) setTextArrived(true);
+                  }}
+                  className="text-2xl leading-relaxed text-white/90 text-center"
+                  style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
+                >
+                  "{thought.content}"
+                </motion.p>
+              </div>
+
+              {/* Connection whisper — fades in quietly after text arrives */}
               <motion.p
-                animate={{
-                  opacity: isCard ? 1 : 0,
-                  y: isCard ? 0 : 10,
-                  filter: isCard ? "blur(0px)" : "blur(5px)",
-                }}
-                transition={{ delay: 0.48, duration: 1.0, ease: "easeOut" }}
-                className="flex-1 flex items-center justify-center text-2xl leading-relaxed text-white/90"
+                animate={{ opacity: textArrived ? 1 : 0 }}
+                transition={{ duration: 1.6, ease: "easeOut" }}
+                className="text-[11px] text-white/28 tracking-wider text-center shrink-0 mt-2 mb-1"
                 style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
               >
-                "{thought.content}"
+                {whisper}
               </motion.p>
 
               {/* Reactions — staggered in late, giving linger time */}
               <motion.div
                 animate={{ opacity: isCard ? 1 : 0, y: isCard ? 0 : 8 }}
-                transition={{ delay: 1.7, duration: 0.7 }}
+                transition={{ delay: 2.8, duration: 0.85 }}
                 className="w-full shrink-0 mt-4"
               >
                 <div className="flex gap-2.5 w-full">
@@ -381,7 +431,7 @@ export function FloatingBubbleReceive({ thought, onClose, onReceiveAnother }: Pr
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: isCard ? 1 : 0 }}
-                    transition={{ delay: 2.4, duration: 0.65 }}
+                    transition={{ delay: 3.6, duration: 0.8 }}
                     className="mt-4 flex gap-2.5"
                   >
                     {onReceiveAnother && (
@@ -416,7 +466,7 @@ export function FloatingBubbleReceive({ thought, onClose, onReceiveAnother }: Pr
                 <motion.button
                   initial={{ opacity: 0 }}
                   animate={{ opacity: isCard ? (reported ? 0.25 : 0.09) : 0 }}
-                  transition={{ delay: 3.2, duration: 0.8 }}
+                  transition={{ delay: 4.8, duration: 1.0 }}
                   onClick={handleReport}
                   disabled={reported}
                   className="mt-5 w-full text-[9px] tracking-widest uppercase text-white/50 hover:text-white/30 transition-colors cursor-pointer disabled:cursor-default"

@@ -243,7 +243,7 @@ export default function Home() {
               className="text-sm text-white/30 tracking-wide"
               style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
             >
-              A thought is waiting for you…
+              Someone left this here for you…
             </motion.p>
           ) : isOverLimit ? (
             <motion.p
