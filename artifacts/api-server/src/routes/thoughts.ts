@@ -53,6 +53,17 @@ router.post("/thoughts/receive", async (req, res) => {
 
   const { userId } = parsed.data;
 
+  // Require user to have submitted at least 1 thought
+  const [userThoughtCount] = await db
+    .select({ count: count() })
+    .from(thoughtsTable)
+    .where(eq(thoughtsTable.userId, userId));
+
+  if ((userThoughtCount?.count ?? 0) === 0) {
+    res.status(403).json({ error: "Release a thought first before you can receive one." });
+    return;
+  }
+
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
 
@@ -73,23 +84,16 @@ router.post("/thoughts/receive", async (req, res) => {
     return;
   }
 
-  const alreadyReceived = await db
-    .select({ thoughtId: receivesTable.thoughtId })
-    .from(receivesTable)
-    .where(eq(receivesTable.userId, userId));
-
-  const alreadyReceivedIds = alreadyReceived.map((r) => r.thoughtId);
-
-  let thoughtQuery = db
+  // Use weighted random: popular thoughts (more reactions) surface more often
+  // Weight = felt_this_count + made_think_count + 1 (so even unreacted thoughts have a chance)
+  const thoughts = await db
     .select()
     .from(thoughtsTable)
     .where(ne(thoughtsTable.userId, userId))
-    .orderBy(sql`RANDOM()`)
+    .orderBy(sql`RANDOM() * (${thoughtsTable.feltThisCount} + ${thoughtsTable.madeThinkCount} + 1) DESC`)
     .limit(1);
 
-  const thoughts = await thoughtQuery;
-
-  let thought = thoughts[0];
+  const thought = thoughts[0];
 
   if (!thought) {
     res.status(404).json({ error: "No thoughts available yet. Be the first to release one!" });

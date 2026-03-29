@@ -1,0 +1,132 @@
+Improve my existing app "Into the Void" with the following UX and feature upgrades.
+
+GOAL:
+Make the app feel more emotional, calming, and engaging while keeping it minimal.
+
+----------------------------------------
+
+HOME SCREEN IMPROVEMENTS
+
+1. Add a subtle emotional hook above the Receive button:
+- Example text:
+  "Someone left a thought for you"
+  OR
+  "A thought is waiting..."
+
+2. Add a feedback line under the title:
+- Example:
+  "Your last thought reached 12 people"
+
+3. Improve the Receive button:
+- Add soft glow
+- Add slow pulse animation
+- Make it the main visual focus
+
+4. Update tagline text:
+Replace:
+"RELEASE. RECEIVE. REFLECT."
+With something softer:
+- "Let it go. See what's out there."
+- OR "Release. Receive. Let go."
+
+----------------------------------------
+
+RELEASE INPUT SCREEN
+
+1. Improve placeholder text:
+Replace:
+"What's weighing on your mind?"
+With:
+- "Let it out..."
+- OR "Say it... no one knows it's you"
+
+2. Keep mood icons but make them subtle and minimal
+
+----------------------------------------
+
+RECEIVE EXPERIENCE (IMPORTANT)
+
+Create a new screen/interaction:
+
+1. When user taps "Receive":
+- A glowing bubble floats into the center slowly
+
+2. User taps the bubble:
+- Bubble pops with soft animation
+
+3. Show thought inside bubble:
+- Text centered
+- Optional mood icon
+- Optional "Anonymous" label
+
+4. Add two reaction buttons:
+- ❤️ Felt this
+- 💭 Made me think
+
+5. After reaction:
+- Bubble fades away gently
+
+----------------------------------------
+
+REACTION SYSTEM
+
+1. Store reaction counts for each thought:
+- heart_count
+- think_count
+
+2. Increase visibility of thoughts with higher reactions:
+- Popular thoughts should appear more often
+
+----------------------------------------
+
+MY ORBIT PAGE (IMPORTANT UPGRADE)
+
+Replace static cards with:
+
+1. Floating bubble system:
+- Each thought appears as a bubble
+- Different sizes based on engagement
+- Slow drifting animation
+
+2. When user taps a bubble:
+- Show full thought
+- Show:
+  ❤️ reaction count
+  💭 reaction count
+  "Seen X times" (optional)
+
+----------------------------------------
+
+RETENTION LOOP
+
+1. Add daily limit:
+- User gets 3 receives per day
+
+2. Require:
+- User must submit at least 1 thought to unlock receives
+
+3. Show:
+- "3 / 3 receives remaining today"
+
+----------------------------------------
+
+VISUAL STYLE
+
+- Dark space background
+- Soft glowing bubbles
+- Minimal UI
+- Smooth animations (slow, calming)
+- No clutter
+
+----------------------------------------
+
+GENERAL RULES
+
+- Keep everything simple
+- No comments or replies between users
+- No profiles or messaging
+- Focus on emotional experience, not social features
+
+----------------------------------------
+
+Make all updates clean, minimal, and consistent with a calm, relaxing atmosphere.

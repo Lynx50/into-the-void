@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Search } from "lucide-react";
+import { Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MOODS, type MoodId } from "@/components/mood-icon";
-import { useSubmitThought, useReceiveThought, useReceiveCount, useUser } from "@/hooks/use-thoughts";
-import { ReceivedThoughtModal } from "@/components/received-thought-modal";
+import { useSubmitThought, useReceiveThought, useReceiveCount, useMyThoughts, useUser } from "@/hooks/use-thoughts";
+import { FloatingBubbleReceive } from "@/components/floating-bubble-receive";
 import { ReceivedThought } from "@workspace/api-client-react";
 
 export default function Home() {
@@ -18,8 +18,14 @@ export default function Home() {
   const submitMutation = useSubmitThought();
   const receiveMutation = useReceiveThought();
   const { data: receiveCountData } = useReceiveCount();
+  const { data: myThoughts } = useMyThoughts();
 
   const isOverLimit = receiveCountData?.remaining === 0;
+  const hasSubmitted = myThoughts && myThoughts.length > 0;
+  const lastThought = myThoughts?.[0];
+  const lastThoughtReactions = lastThought
+    ? lastThought.feltThisCount + lastThought.madeThinkCount
+    : 0;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +44,7 @@ export default function Home() {
           setContent("");
           setSelectedMood(null);
           setIsSuccess(true);
-          setTimeout(() => setIsSuccess(false), 3000);
+          setTimeout(() => setIsSuccess(false), 3500);
         },
       }
     );
@@ -56,58 +62,84 @@ export default function Home() {
         },
         onError: (err: any) => {
           if (err.status === 404) {
-            setReceiveError("The void is quiet right now. Try again later.");
+            setReceiveError("The void is quiet. Be the first to release one.");
           } else if (err.status === 429) {
             setReceiveError("You've reached your limit for today.");
+          } else if (err.status === 403) {
+            setReceiveError("Release a thought first to unlock receiving.");
           } else {
             setReceiveError("Failed to reach the void.");
           }
           setTimeout(() => setReceiveError(null), 4000);
-        }
+        },
       }
     );
   };
 
+  const receiveDisabled = receiveMutation.isPending || isOverLimit || !isReady || !hasSubmitted;
+
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 pb-32">
-      
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 pb-36">
+
       {/* Header */}
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 1, delay: 0.2 }}
-        className="absolute top-12 left-0 right-0 text-center pointer-events-none"
+        transition={{ duration: 1.2, delay: 0.2 }}
+        className="absolute top-10 left-0 right-0 text-center pointer-events-none"
       >
-        <h1 className="text-3xl md:text-5xl font-display italic text-white/90 text-glow">
+        <h1
+          className="text-4xl md:text-5xl text-white/90"
+          style={{ fontFamily: "var(--font-display)", fontStyle: "italic", textShadow: "0 0 40px rgba(180,140,255,0.3)" }}
+        >
           Into the Void
         </h1>
-        <p className="text-sm font-medium tracking-[0.2em] text-white/40 mt-3 uppercase">
-          Release. Receive. Reflect.
+        <p className="text-xs font-medium tracking-[0.25em] text-white/30 mt-3 uppercase">
+          Release. Receive. Let go.
         </p>
+
+        {/* Feedback line: last thought engagement */}
+        <AnimatePresence>
+          {lastThought && lastThoughtReactions > 0 && (
+            <motion.p
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-2 text-[11px] tracking-wide text-white/25"
+            >
+              Your last thought touched {lastThoughtReactions} {lastThoughtReactions === 1 ? "person" : "people"}
+            </motion.p>
+          )}
+        </AnimatePresence>
       </motion.div>
 
-      {/* Main Submit Area */}
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
+      {/* Release Input */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.8, delay: 0.4 }}
-        className="w-full max-w-2xl mt-16 z-10"
+        transition={{ duration: 1, delay: 0.4 }}
+        className="w-full max-w-xl mt-16 z-10"
       >
-        <form onSubmit={handleSubmit} className="relative group">
-          <div className="glass-panel rounded-3xl p-6 sm:p-8 transition-all duration-500 focus-within:bg-white/[0.08] focus-within:border-white/20 focus-within:shadow-[0_0_40px_rgba(255,255,255,0.05)]">
-            
+        <form onSubmit={handleSubmit} className="relative">
+          <div
+            className="rounded-3xl p-6 sm:p-8 transition-all duration-500"
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              boxShadow: "0 0 0 0 rgba(140,100,255,0)",
+            }}
+          >
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="What's weighing on your mind?"
+              placeholder="Say it... no one knows it's you"
               maxLength={280}
-              className="w-full bg-transparent border-none text-xl sm:text-2xl font-display text-white/90 placeholder:text-white/20 focus:outline-none focus:ring-0 resize-none min-h-[120px] no-scrollbar leading-relaxed"
+              className="w-full bg-transparent border-none text-xl sm:text-2xl text-white/85 placeholder:text-white/18 focus:outline-none focus:ring-0 resize-none min-h-[110px] leading-relaxed"
+              style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
             />
 
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mt-6 border-t border-white/5 pt-6">
-              
-              {/* Mood Selector */}
-              <div className="flex flex-wrap gap-2">
+            <div className="flex justify-between items-center mt-5 pt-5 border-t border-white/5">
+              {/* Mood chips — minimal */}
+              <div className="flex gap-1.5">
                 {MOODS.map((mood) => {
                   const Icon = mood.icon;
                   const isSelected = selectedMood === mood.id;
@@ -116,124 +148,155 @@ export default function Home() {
                       key={mood.id}
                       type="button"
                       onClick={() => setSelectedMood(isSelected ? null : mood.id)}
-                      className={cn(
-                        "p-2.5 rounded-full transition-all duration-300 group/btn",
-                        isSelected 
-                          ? "bg-white/15 border border-white/30 shadow-lg" 
-                          : "bg-transparent border border-transparent hover:bg-white/5 hover:border-white/10 text-white/40"
-                      )}
                       title={mood.label}
+                      className={cn(
+                        "w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300",
+                        isSelected
+                          ? "bg-white/12 scale-110"
+                          : "opacity-30 hover:opacity-60 hover:bg-white/5"
+                      )}
                     >
-                      <Icon 
-                        className={cn(
-                          "w-5 h-5 transition-all duration-300",
-                          isSelected ? mood.color : "group-hover/btn:text-white/80"
-                        )} 
-                      />
+                      <Icon className={cn("w-4 h-4", isSelected ? mood.color : "text-white/70")} />
                     </button>
                   );
                 })}
               </div>
 
-              {/* Submit Button */}
               <button
                 type="submit"
                 disabled={!content.trim() || submitMutation.isPending}
                 className={cn(
-                  "flex items-center gap-2 px-6 py-3 rounded-full font-medium tracking-wide text-sm transition-all duration-500",
+                  "flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium tracking-wide transition-all duration-500",
                   content.trim() && !submitMutation.isPending
-                    ? "bg-primary/80 hover:bg-primary text-white shadow-[0_0_20px_rgba(100,50,200,0.3)] hover:shadow-[0_0_30px_rgba(100,50,200,0.5)] cursor-pointer"
-                    : "bg-white/5 text-white/30 cursor-not-allowed"
+                    ? "bg-primary/70 hover:bg-primary/90 text-white cursor-pointer shadow-[0_0_20px_rgba(140,100,255,0.25)]"
+                    : "bg-white/5 text-white/25 cursor-not-allowed"
                 )}
               >
-                <span>{submitMutation.isPending ? "Releasing..." : "Release"}</span>
-                <Send className="w-4 h-4" />
+                {submitMutation.isPending ? "Releasing..." : "Release"}
+                <Send className="w-3.5 h-3.5" />
               </button>
-
             </div>
           </div>
 
-          {/* Success Message */}
           <AnimatePresence>
             {isSuccess && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
+              <motion.p
+                initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="absolute -bottom-12 left-0 right-0 text-center text-sm tracking-widest uppercase text-primary font-medium"
+                exit={{ opacity: 0 }}
+                className="absolute -bottom-9 left-0 right-0 text-center text-xs tracking-[0.25em] uppercase text-primary/70"
               >
-                Your thought is in the void
-              </motion.div>
+                ✦ Your thought is drifting through the void
+              </motion.p>
             )}
           </AnimatePresence>
         </form>
       </motion.div>
 
-      {/* Receive Area */}
-      <motion.div 
+      {/* Receive section */}
+      <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 1, delay: 0.8 }}
-        className="mt-24 z-10 flex flex-col items-center"
+        transition={{ duration: 1.2, delay: 0.9 }}
+        className="mt-20 z-10 flex flex-col items-center gap-4"
       >
+        {/* Emotional hook */}
+        <AnimatePresence>
+          {hasSubmitted && !isOverLimit && (
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-sm text-white/35 tracking-wide"
+              style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
+            >
+              A thought is waiting for you...
+            </motion.p>
+          )}
+          {!hasSubmitted && isReady && (
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-xs text-white/25 tracking-wide text-center max-w-[180px]"
+            >
+              Release a thought first to unlock receiving
+            </motion.p>
+          )}
+        </AnimatePresence>
+
+        {/* Receive button — the main focus */}
         <button
           onClick={handleReceive}
-          disabled={receiveMutation.isPending || isOverLimit || !isReady}
+          disabled={receiveDisabled}
           className={cn(
-            "relative group flex items-center justify-center w-24 h-24 sm:w-32 sm:h-32 rounded-full transition-all duration-700",
-            !isOverLimit && !receiveMutation.isPending
-              ? "hover:scale-105 cursor-pointer"
-              : "opacity-50 cursor-not-allowed grayscale"
+            "relative group flex items-center justify-center w-28 h-28 sm:w-36 sm:h-36 rounded-full transition-all duration-700",
+            !receiveDisabled ? "hover:scale-105 cursor-pointer" : "opacity-40 cursor-not-allowed"
           )}
         >
-          <div className="absolute inset-0 rounded-full bg-white/5 backdrop-blur-sm border border-white/10 group-hover:border-white/30 group-hover:bg-white/10 transition-all duration-500" />
-          
-          {/* Pulsing ring */}
-          {!isOverLimit && (
-             <div className="absolute inset-0 rounded-full border border-primary/30 animate-[ping_3s_cubic-bezier(0,0,0.2,1)_infinite]" />
+          {/* Glow layers */}
+          {!receiveDisabled && (
+            <>
+              <div className="absolute inset-0 rounded-full bg-primary/15 blur-2xl scale-125 animate-pulse" />
+              <div className="absolute inset-0 rounded-full border border-primary/25 animate-[ping_3s_cubic-bezier(0,0,0.2,1)_infinite]" />
+              <div className="absolute inset-[-6px] rounded-full border border-primary/10 animate-[ping_3s_cubic-bezier(0,0,0.2,1)_infinite_0.8s]" />
+            </>
           )}
 
-          <div className="flex flex-col items-center gap-2 text-white/70 group-hover:text-white transition-colors z-10">
+          {/* Bubble body */}
+          <div
+            className="absolute inset-0 rounded-full transition-all duration-500 group-hover:bg-white/10"
+            style={{
+              background: "radial-gradient(circle at 35% 35%, rgba(180,140,255,0.12) 0%, rgba(100,60,200,0.06) 60%, transparent 100%)",
+              border: "1px solid rgba(200,160,255,0.18)",
+              boxShadow: receiveDisabled ? "none" : "0 0 30px rgba(140,100,255,0.15), inset 0 0 20px rgba(200,160,255,0.04)",
+            }}
+          />
+          {/* Shine */}
+          {!receiveDisabled && (
+            <div className="absolute top-4 left-6 w-6 h-3 rounded-full bg-white/15 blur-sm rotate-[-30deg]" />
+          )}
+
+          <div className="relative z-10 flex flex-col items-center gap-1.5">
             {receiveMutation.isPending ? (
-              <motion.div 
-                animate={{ rotate: 360 }} 
-                transition={{ repeat: Infinity, duration: 2, ease: "linear" }}
-              >
-                <Search className="w-6 h-6 sm:w-8 sm:h-8 opacity-50" />
-              </motion.div>
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ repeat: Infinity, duration: 3, ease: "linear" }}
+                className="w-6 h-6 rounded-full border border-white/30 border-t-white/80"
+              />
             ) : (
-              <Search className="w-6 h-6 sm:w-8 sm:h-8" />
+              <span className="text-white/60 group-hover:text-white/90 transition-colors text-base font-medium tracking-wide">
+                Receive
+              </span>
             )}
-            <span className="text-[10px] sm:text-xs font-medium tracking-[0.2em] uppercase">
-              Receive
-            </span>
           </div>
         </button>
 
-        <div className="mt-6 text-center h-8">
+        {/* Status line */}
+        <div className="h-6 text-center">
           {receiveError ? (
-            <motion.p 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-              className="text-sm text-destructive tracking-wide"
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-xs text-red-400/70 tracking-wide"
             >
               {receiveError}
             </motion.p>
           ) : receiveCountData ? (
-            <p className="text-xs font-medium tracking-[0.15em] text-white/30 uppercase">
-              {receiveCountData.remaining} / {receiveCountData.limit} remaining today
+            <p className="text-[10px] font-medium tracking-[0.2em] text-white/20 uppercase">
+              {receiveCountData.remaining} / {receiveCountData.limit} receives remaining today
             </p>
           ) : null}
         </div>
       </motion.div>
 
-      {/* Modal for received thought */}
-      {receivedThought && (
-        <ReceivedThoughtModal 
-          thought={receivedThought} 
-          onClose={() => setReceivedThought(null)} 
-        />
-      )}
-
+      {/* Floating bubble overlay */}
+      <AnimatePresence>
+        {receivedThought && (
+          <FloatingBubbleReceive
+            thought={receivedThought}
+            onClose={() => setReceivedThought(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
