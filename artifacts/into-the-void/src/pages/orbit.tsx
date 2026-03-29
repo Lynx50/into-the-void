@@ -215,40 +215,70 @@ export default function Orbit() {
                   }
                   whileHover={isInteractive ? { scale: 1.11, transition: { duration: 0.4 } } : undefined}
                   style={b.isPhantom ? {
-                    background: `radial-gradient(circle at 30% 26%, rgba(255,255,255,0.04) 0%, hsla(${b.hue},28%,55%,0.025) 50%, transparent 100%)`,
-                    border: `1px solid rgba(255,255,255,0.07)`,
+                    background: `radial-gradient(circle at 50% 50%, transparent 50%, hsla(${b.hue},30%,70%,0.04) 85%, rgba(255,255,255,0.03) 100%)`,
+                    border: `1px solid rgba(255,255,255,0.08)`,
+                    backdropFilter: "blur(3px)",
+                    WebkitBackdropFilter: "blur(3px)",
                   } : {
-                    background: `radial-gradient(circle at 28% 24%, rgba(255,255,255,0.22) 0%, hsla(${b.hue},62%,80%,0.14) 24%, hsla(${b.hue},50%,52%,0.08) 58%, hsla(${b.hue + 18},42%,28%,0.05) 100%)`,
-                    border: `1px solid rgba(255,255,255,${b.glowOpacity * 3.5 + 0.1})`,
-                    boxShadow: `inset 0 1px 0 rgba(255,255,255,${b.glowOpacity * 2.5}), inset 0 -1px 0 rgba(0,0,0,0.08), 0 0 ${18 + (b.thought?.feltThisCount ?? 0) * 5 + (b.thought?.madeThinkCount ?? 0) * 5}px hsla(${b.hue},50%,68%,${b.glowOpacity + 0.04})`,
-                    backdropFilter: "blur(6px)",
-                    WebkitBackdropFilter: "blur(6px)",
+                    backdropFilter: "blur(8px)",
+                    WebkitBackdropFilter: "blur(8px)",
                   }}
                 >
-                  {/* Specular highlight */}
-                  {!b.isPhantom && (
-                    <>
-                      <div
-                        className="absolute rounded-full"
-                        style={{
-                          width: "32%", height: "16%",
-                          top: "11%", left: "15%",
-                          background: `radial-gradient(ellipse, rgba(255,255,255,0.78) 0%, transparent 100%)`,
-                          filter: "blur(2px)",
+                  {/* Glass layers — only for real thoughts */}
+                  {!b.isPhantom && (() => {
+                    const o = b.glowOpacity;
+                    const spec = Math.min(o * 8.5, 0.88);
+                    const sec = Math.min(o * 3.5, 0.40);
+                    const engagement = (b.thought?.feltThisCount ?? 0) + (b.thought?.madeThinkCount ?? 0);
+                    return (
+                      <>
+                        {/* Rim illumination */}
+                        <div className="absolute inset-0 rounded-full" style={{
+                          background: `radial-gradient(circle at 50% 50%, transparent 44%, hsla(${b.hue},58%,84%,${o * 1.3}) 82%, rgba(255,255,255,${o * 1.1}) 100%)`,
+                        }} />
+                        {/* Glass body tint */}
+                        <div className="absolute inset-0 rounded-full" style={{
+                          background: `radial-gradient(circle at 30% 26%, rgba(255,255,255,${o * 1.8}) 0%, hsla(${b.hue},55%,74%,${o * 0.9}) 28%, hsla(${b.hue},46%,48%,${o * 0.55}) 62%, hsla(${b.hue + 18},38%,24%,${o * 0.38}) 100%)`,
+                          border: `1px solid rgba(255,255,255,${Math.min(o * 5, 0.6)})`,
+                          boxShadow: `inset 0 1px 0 rgba(255,255,255,${Math.min(o * 3.5, 0.5)}), inset 0 -1px 0 rgba(0,0,0,0.1), inset 0 0 ${b.size * 0.15}px rgba(255,255,255,${o * 0.22}), 0 0 ${20 + engagement * 5}px hsla(${b.hue},52%,68%,${o + 0.04})`,
+                        }} />
+                        {/* Primary specular highlight */}
+                        <div className="absolute rounded-full" style={{
+                          width: "36%", height: "19%",
+                          top: "10%", left: "12%",
+                          background: `radial-gradient(ellipse, rgba(255,255,255,${spec}) 0%, rgba(255,255,255,${spec * 0.3}) 55%, transparent 100%)`,
+                          filter: "blur(1.8px)",
                           transform: "rotate(-32deg)",
-                        }}
-                      />
-                      <div
-                        className="absolute rounded-full"
-                        style={{
-                          width: "12%", height: "6%",
-                          top: "7%", left: "26%",
-                          background: "rgba(255,255,255,0.55)",
-                          filter: "blur(0.8px)",
+                        }} />
+                        {/* Tiny sharp glint */}
+                        <div className="absolute rounded-full" style={{
+                          width: "11%", height: "5.5%",
+                          top: "7%", left: "25%",
+                          background: `rgba(255,255,255,${Math.min(spec * 0.92, 0.85)})`,
+                          filter: "blur(0.4px)",
                           transform: "rotate(-32deg)",
-                        }}
-                      />
-                    </>
+                        }} />
+                        {/* Secondary lower-right reflection */}
+                        <div className="absolute rounded-full" style={{
+                          width: "28%", height: "13%",
+                          bottom: "12%", right: "8%",
+                          background: `radial-gradient(ellipse, rgba(255,255,255,${sec}) 0%, transparent 100%)`,
+                          filter: "blur(3px)",
+                          transform: "rotate(-32deg)",
+                        }} />
+                      </>
+                    );
+                  })()}
+
+                  {/* Phantom: minimal single highlight */}
+                  {b.isPhantom && (
+                    <div className="absolute rounded-full" style={{
+                      width: "28%", height: "14%",
+                      top: "12%", left: "16%",
+                      background: "radial-gradient(ellipse, rgba(255,255,255,0.12) 0%, transparent 100%)",
+                      filter: "blur(2px)",
+                      transform: "rotate(-32deg)",
+                    }} />
                   )}
                 </motion.div>
 

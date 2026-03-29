@@ -106,64 +106,67 @@ interface GlassSphereProps {
 }
 
 function GlassSphere({ size, hue, baseOpacity, depth }: GlassSphereProps) {
-  const depthMult = depth === 0 ? 0.55 : depth === 1 ? 0.78 : 1.0;
-  const o = baseOpacity * depthMult;
-  const glowR = depth === 0 ? 0.025 : depth === 1 ? 0.05 : 0.09;
-  const specular = Math.min(o * 5.5, 0.82);
+  const dm = depth === 0 ? 0.55 : depth === 1 ? 0.78 : 1.0;
+  const o = baseOpacity * dm;
+  const glowR = depth === 0 ? 0.028 : depth === 1 ? 0.055 : 0.10;
+  const spec = Math.min(o * 6.5, 0.88);
+  const sec = Math.min(o * 2.8, 0.36);
+  const blurPx = Math.max(size * 0.2, 6);
 
   return (
     <div className="relative w-full h-full" style={{ overflow: "visible" }}>
-      {/* Outer ambient glow — blurred behind the sphere */}
-      <div
-        className="absolute rounded-full"
-        style={{
-          inset: "-30%",
-          background: `radial-gradient(circle, hsla(${hue},60%,68%,${glowR * 1.8}) 0%, hsla(${hue},50%,50%,${glowR * 0.5}) 45%, transparent 72%)`,
-          filter: `blur(${size * 0.22}px)`,
-          zIndex: 0,
-        }}
-      />
 
-      {/* Glass body */}
-      <div
-        className="absolute inset-0 rounded-full"
-        style={{
-          background: `radial-gradient(circle at 28% 24%, rgba(255,255,255,${o * 2.6}) 0%, hsla(${hue},60%,78%,${o * 1.1}) 22%, hsla(${hue},50%,52%,${o * 0.65}) 58%, hsla(${hue + 18},42%,28%,${o * 0.45}) 100%)`,
-          border: `1px solid rgba(255,255,255,${o * 3.8})`,
-          boxShadow: `inset 0 1px 0 rgba(255,255,255,${o * 2.2}), inset 0 -1px 0 rgba(0,0,0,${o * 1.2}), 0 0 ${size * 0.3}px hsla(${hue},50%,65%,${glowR * 1.2})`,
-          zIndex: 1,
-        }}
-      />
+      {/* Layer 0: Outer ambient glow */}
+      <div className="absolute rounded-full" style={{
+        inset: "-32%",
+        background: `radial-gradient(circle, hsla(${hue},62%,68%,${glowR * 1.7}) 0%, hsla(${hue},50%,50%,${glowR * 0.4}) 42%, transparent 70%)`,
+        filter: `blur(${blurPx}px)`,
+        zIndex: 0,
+      }} />
 
-      {/* Specular highlight — bright oval, upper-left */}
-      <div
-        className="absolute rounded-full"
-        style={{
-          width: "30%",
-          height: "16%",
-          top: "12%",
-          left: "16%",
-          background: `radial-gradient(ellipse, rgba(255,255,255,${specular}) 0%, transparent 100%)`,
-          filter: "blur(1.8px)",
-          transform: "rotate(-32deg)",
-          zIndex: 2,
-        }}
-      />
+      {/* Layer 1: Rim illumination — glass edge catches more light */}
+      <div className="absolute inset-0 rounded-full" style={{
+        background: `radial-gradient(circle at 50% 50%, transparent 42%, hsla(${hue},55%,82%,${o * 1.1}) 80%, rgba(255,255,255,${o * 0.9}) 100%)`,
+        zIndex: 1,
+      }} />
 
-      {/* Tiny secondary glint */}
-      <div
-        className="absolute rounded-full"
-        style={{
-          width: "11%",
-          height: "6%",
-          top: "8%",
-          left: "28%",
-          background: `rgba(255,255,255,${Math.min(specular * 0.7, 0.6)})`,
-          filter: "blur(0.8px)",
-          transform: "rotate(-32deg)",
-          zIndex: 2,
-        }}
-      />
+      {/* Layer 2: Glass body — tinted translucent with subtle inner shading */}
+      <div className="absolute inset-0 rounded-full" style={{
+        background: `radial-gradient(circle at 32% 28%, rgba(255,255,255,${o * 1.5}) 0%, hsla(${hue},52%,72%,${o * 0.75}) 30%, hsla(${hue},45%,48%,${o * 0.45}) 65%, hsla(${hue + 20},38%,25%,${o * 0.3}) 100%)`,
+        border: `1px solid rgba(255,255,255,${Math.min(o * 4.5, 0.55)})`,
+        boxShadow: `inset 0 1px 0 rgba(255,255,255,${Math.min(o * 3, 0.45)}), inset 0 -1px 0 rgba(0,0,0,${o * 1.4}), inset 0 0 ${size * 0.18}px rgba(255,255,255,${o * 0.18}), 0 0 ${size * 0.28}px hsla(${hue},50%,65%,${glowR * 1.0})`,
+        zIndex: 2,
+      }} />
+
+      {/* Layer 3: Primary specular highlight — upper-left, soft bright oval */}
+      <div className="absolute rounded-full" style={{
+        width: "34%", height: "18%",
+        top: "10%", left: "13%",
+        background: `radial-gradient(ellipse, rgba(255,255,255,${spec}) 0%, rgba(255,255,255,${spec * 0.35}) 55%, transparent 100%)`,
+        filter: "blur(1.5px)",
+        transform: "rotate(-32deg)",
+        zIndex: 3,
+      }} />
+
+      {/* Layer 4: Tiny sharp glint (crispest point of the specular) */}
+      <div className="absolute rounded-full" style={{
+        width: "10%", height: "5%",
+        top: "7%", left: "26%",
+        background: `rgba(255,255,255,${Math.min(spec * 0.9, 0.82)})`,
+        filter: "blur(0.4px)",
+        transform: "rotate(-32deg)",
+        zIndex: 3,
+      }} />
+
+      {/* Layer 5: Secondary reflection — lower-right, very faint (opposite light bounce) */}
+      <div className="absolute rounded-full" style={{
+        width: "26%", height: "12%",
+        bottom: "13%", right: "9%",
+        background: `radial-gradient(ellipse, rgba(255,255,255,${sec}) 0%, transparent 100%)`,
+        filter: "blur(3px)",
+        transform: "rotate(-32deg)",
+        zIndex: 3,
+      }} />
     </div>
   );
 }
