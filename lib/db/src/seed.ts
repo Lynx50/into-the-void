@@ -132,11 +132,18 @@ async function seed() {
 
   console.log(`Inserting ${SEED_THOUGHTS.length} seed thoughts...`);
 
+  function moodToCategory(mood: string | null): "relatable" | "wisdom" | "curious" {
+    if (mood === "thoughtful") return "wisdom";
+    if (mood === "happy" || mood === "funny") return "curious";
+    return "relatable";
+  }
+
   await db.insert(thoughtsTable).values(
     SEED_THOUGHTS.map((t) => ({
       userId: SEED_USER_ID,
       content: t.content,
       mood: t.mood,
+      category: moodToCategory(t.mood),
     })),
   );
 

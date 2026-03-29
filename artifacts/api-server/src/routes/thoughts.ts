@@ -14,6 +14,21 @@ const router: IRouter = Router();
 
 const DAILY_RECEIVE_LIMIT = 3;
 
+// ─── Category helper ───────────────────────────────────────────────────────────
+function moodToCategory(mood: string | null | undefined): "relatable" | "wisdom" | "curious" {
+  if (mood === "thoughtful") return "wisdom";
+  if (mood === "happy" || mood === "funny") return "curious";
+  return "relatable";
+}
+
+// Weighted receive buckets: 60% relatable · 25% wisdom · 15% curious
+function pickCategory(): "relatable" | "wisdom" | "curious" {
+  const r = Math.random() * 100;
+  if (r < 60) return "relatable";
+  if (r < 85) return "wisdom";
+  return "curious";
+}
+
 // ─── Content moderation ────────────────────────────────────────────────────────
 // Exact phrases / substrings that are always blocked.
 // Emotional / sad / reflective language is intentionally NOT on this list.
@@ -64,7 +79,12 @@ router.post("/thoughts", async (req, res) => {
 
   const [thought] = await db
     .insert(thoughtsTable)
-    .values({ userId, content: content.trim(), mood: mood ?? null })
+    .values({
+      userId,
+      content: content.trim(),
+      mood: mood ?? null,
+      category: moodToCategory(mood),
+    })
     .returning();
 
   res.status(201).json({
@@ -118,23 +138,35 @@ router.post("/thoughts/receive", async (req, res) => {
     return;
   }
 
-  // Use weighted random: popular thoughts surface more often.
-  // Exclude thoughts that have been reported >= REPORT_HIDE_THRESHOLD times.
-  const thoughts = await db
+  // Weighted category selection: 60% relatable · 25% wisdom · 15% curious
+  // Falls back to the full pool if the target category has no eligible thoughts.
+  const targetCategory = pickCategory();
+
+  const notReported = sql`(
+    SELECT COUNT(*) FROM reactions
+    WHERE reactions.thought_id = ${thoughtsTable.id}
+      AND reactions.reaction_type LIKE 'report%'
+  ) < ${REPORT_HIDE_THRESHOLD}`;
+
+  const baseWhere = and(ne(thoughtsTable.userId, userId), notReported);
+  const weightedOrder = sql`RANDOM() * (${thoughtsTable.feltThisCount} + ${thoughtsTable.madeThinkCount} + 1) DESC`;
+
+  let thoughts = await db
     .select()
     .from(thoughtsTable)
-    .where(
-      and(
-        ne(thoughtsTable.userId, userId),
-        sql`(
-          SELECT COUNT(*) FROM reactions
-          WHERE reactions.thought_id = ${thoughtsTable.id}
-            AND reactions.reaction_type LIKE 'report%'
-        ) < ${REPORT_HIDE_THRESHOLD}`,
-      ),
-    )
-    .orderBy(sql`RANDOM() * (${thoughtsTable.feltThisCount} + ${thoughtsTable.madeThinkCount} + 1) DESC`)
+    .where(and(baseWhere, eq(thoughtsTable.category, targetCategory)))
+    .orderBy(weightedOrder)
     .limit(1);
+
+  // Fallback: if no thought found in target category, use the full eligible pool
+  if (!thoughts[0]) {
+    thoughts = await db
+      .select()
+      .from(thoughtsTable)
+      .where(baseWhere)
+      .orderBy(weightedOrder)
+      .limit(1);
+  }
 
   const thought = thoughts[0];
 

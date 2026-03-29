@@ -7,6 +7,7 @@ export const thoughtsTable = pgTable("thoughts", {
   userId: text("user_id").notNull(),
   content: text("content").notNull(),
   mood: text("mood"),
+  category: text("category"),   // 'relatable' | 'wisdom' | 'curious' | null (treated as relatable)
   feltThisCount: integer("felt_this_count").notNull().default(0),
   madeThinkCount: integer("made_think_count").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
