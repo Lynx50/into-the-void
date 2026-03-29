@@ -52,7 +52,7 @@ export default function Home() {
         },
         onError: (err: any) => {
           if (err.status === 422) {
-            setSubmitError("Please keep thoughts kind.");
+            setSubmitError("This thought can't be shared here.");
           } else {
             setSubmitError("Couldn't release that one. Try again.");
           }

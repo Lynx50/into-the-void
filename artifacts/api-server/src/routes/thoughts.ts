@@ -14,16 +14,34 @@ const router: IRouter = Router();
 
 const DAILY_RECEIVE_LIMIT = 3;
 
-// ─── Content filter ────────────────────────────────────────────────────────────
-const BLOCKED = [
-  "nigger","nigga","faggot"," fag ","chink","spic","kike","wetback","tranny",
-  "kill yourself","kys","go die","i want to die","end my life","suicide","self harm",
-  "bomb","shooting","massacre",
+// ─── Content moderation ────────────────────────────────────────────────────────
+// Exact phrases / substrings that are always blocked.
+// Emotional / sad / reflective language is intentionally NOT on this list.
+const BLOCKED_PHRASES = [
+  // Self-harm intent (allow "I feel sad", "I feel hopeless" etc — block explicit intent)
+  "kill myself", "killing myself", "end my life", "end it all", "take my life",
+  "want to die", "wanna die", "going to die", "gonna die", "ready to die",
+  "hurt myself", "harm myself", "cut myself", "cutting myself",
+  "overdose", "overdosing", "don't want to be here anymore",
+  "can't go on", "cannot go on", "no point living", "no reason to live",
+  "better off dead", "better off without me",
+  // Threats
+  "kill you", "kill her", "kill him", "kill them",
+  "gonna hurt", "going to hurt", "i will hurt", "i'll hurt",
+  "bomb", "shooting", "massacre", "attack",
+  // Hate speech — slurs
+  "nigger", "nigga", "faggot", " fag ", "chink", "spic", "kike",
+  "wetback", "tranny", "raghead", "sandnigger", "gook", "zipperhead",
+  // Explicit abuse
+  "rape", "molest", "child porn", "pedophile",
 ];
+
 function isBlocked(text: string): boolean {
-  const t = text.toLowerCase();
-  return BLOCKED.some((w) => t.includes(w));
+  const t = " " + text.toLowerCase() + " ";
+  return BLOCKED_PHRASES.some((phrase) => t.includes(phrase));
 }
+
+const REPORT_HIDE_THRESHOLD = 3;
 
 router.post("/thoughts", async (req, res) => {
   const parsed = SubmitThoughtBody.safeParse(req.body);
@@ -40,7 +58,7 @@ router.post("/thoughts", async (req, res) => {
   }
 
   if (isBlocked(content)) {
-    res.status(422).json({ error: "Please keep thoughts kind. This one couldn't be released." });
+    res.status(422).json({ error: "This thought can't be shared here." });
     return;
   }
 
@@ -100,12 +118,21 @@ router.post("/thoughts/receive", async (req, res) => {
     return;
   }
 
-  // Use weighted random: popular thoughts (more reactions) surface more often
-  // Weight = felt_this_count + made_think_count + 1 (so even unreacted thoughts have a chance)
+  // Use weighted random: popular thoughts surface more often.
+  // Exclude thoughts that have been reported >= REPORT_HIDE_THRESHOLD times.
   const thoughts = await db
     .select()
     .from(thoughtsTable)
-    .where(ne(thoughtsTable.userId, userId))
+    .where(
+      and(
+        ne(thoughtsTable.userId, userId),
+        sql`(
+          SELECT COUNT(*) FROM reactions
+          WHERE reactions.thought_id = ${thoughtsTable.id}
+            AND reactions.reaction_type LIKE 'report%'
+        ) < ${REPORT_HIDE_THRESHOLD}`,
+      ),
+    )
     .orderBy(sql`RANDOM() * (${thoughtsTable.feltThisCount} + ${thoughtsTable.madeThinkCount} + 1) DESC`)
     .limit(1);
 
@@ -263,18 +290,29 @@ router.post("/thoughts/:id/react", async (req, res) => {
 });
 
 // ─── Report ────────────────────────────────────────────────────────────────────
+const VALID_REPORT_CATEGORIES = ["harmful", "abusive", "inappropriate"] as const;
+type ReportCategory = (typeof VALID_REPORT_CATEGORIES)[number];
+
 router.post("/thoughts/:id/report", async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) {
     res.status(400).json({ error: "Invalid thought id" });
     return;
   }
+
   const userId = req.body?.userId;
   if (!userId || typeof userId !== "string") {
     res.status(400).json({ error: "userId required" });
     return;
   }
 
+  const rawCategory = req.body?.category;
+  const category: ReportCategory = VALID_REPORT_CATEGORIES.includes(rawCategory)
+    ? rawCategory
+    : "inappropriate";
+  const reactionType = `report:${category}`;
+
+  // One report per user per thought (any category counts as dedup)
   const [existing] = await db
     .select()
     .from(reactionsTable)
@@ -282,7 +320,7 @@ router.post("/thoughts/:id/report", async (req, res) => {
       and(
         eq(reactionsTable.thoughtId, id),
         eq(reactionsTable.userId, userId),
-        eq(reactionsTable.reactionType, "report"),
+        sql`${reactionsTable.reactionType} LIKE 'report%'`,
       ),
     )
     .limit(1);
@@ -292,7 +330,7 @@ router.post("/thoughts/:id/report", async (req, res) => {
     return;
   }
 
-  await db.insert(reactionsTable).values({ userId, thoughtId: id, reactionType: "report" });
+  await db.insert(reactionsTable).values({ userId, thoughtId: id, reactionType });
 
   res.status(201).json({ reported: true });
 });

@@ -34,7 +34,7 @@ export function FloatingBubbleReceive({ thought, onClose, onReceiveAnother }: Pr
   const reactMutation = useReactToThought();
   const [phase, setPhase] = useState<Phase>("arriving");
   const [reacted, setReacted] = useState<"felt_this" | "made_think" | null>(null);
-  const [reported, setReported] = useState(false);
+  const [reportPhase, setReportPhase] = useState<"idle" | "picking" | "done">("idle");
   const [textArrived, setTextArrived] = useState(false);
   const whisper = useMemo(() => WHISPERS[Math.floor(Math.random() * WHISPERS.length)], []);
 
@@ -73,14 +73,14 @@ export function FloatingBubbleReceive({ thought, onClose, onReceiveAnother }: Pr
     setTimeout(() => onReceiveAnother?.(), 550);
   };
 
-  const handleReport = async () => {
-    if (reported || !userId) return;
-    setReported(true);
+  const handleReport = async (category: "harmful" | "abusive" | "inappropriate") => {
+    if (reportPhase === "done" || !userId) return;
+    setReportPhase("done");
     try {
       await fetch(`/api/thoughts/${thought.id}/report`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({ userId, category }),
       });
     } catch {
       // silent
@@ -462,17 +462,43 @@ export function FloatingBubbleReceive({ thought, onClose, onReceiveAnother }: Pr
                   </motion.p>
                 )}
 
-                {/* Report — very subtle, appears last */}
-                <motion.button
+                {/* Report — very subtle, appears last, expands to category picker */}
+                <motion.div
                   initial={{ opacity: 0 }}
-                  animate={{ opacity: isCard ? (reported ? 0.25 : 0.09) : 0 }}
+                  animate={{ opacity: isCard ? (reportPhase === "done" ? 0.22 : 0.09) : 0 }}
                   transition={{ delay: 4.8, duration: 1.0 }}
-                  onClick={handleReport}
-                  disabled={reported}
-                  className="mt-5 w-full text-[9px] tracking-widest uppercase text-white/50 hover:text-white/30 transition-colors cursor-pointer disabled:cursor-default"
+                  className="mt-5 w-full"
                 >
-                  {reported ? "Reported" : "Flag this thought"}
-                </motion.button>
+                  {reportPhase === "done" ? (
+                    <p className="text-center text-[9px] tracking-widest uppercase text-white/40">
+                      Thank you for flagging this.
+                    </p>
+                  ) : reportPhase === "picking" ? (
+                    <motion.div
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.4 }}
+                      className="flex gap-1.5 justify-center"
+                    >
+                      {(["Harmful", "Abusive", "Inappropriate"] as const).map((label) => (
+                        <button
+                          key={label}
+                          onClick={() => handleReport(label.toLowerCase() as "harmful" | "abusive" | "inappropriate")}
+                          className="text-[9px] tracking-wide uppercase text-white/35 hover:text-white/60 border border-white/8 hover:border-white/18 rounded-lg px-2.5 py-1.5 transition-colors cursor-pointer"
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </motion.div>
+                  ) : (
+                    <button
+                      onClick={() => setReportPhase("picking")}
+                      className="w-full text-[9px] tracking-widest uppercase text-white/35 hover:text-white/50 transition-colors cursor-pointer"
+                    >
+                      Flag this thought
+                    </button>
+                  )}
+                </motion.div>
               </motion.div>
             </motion.div>
           </motion.div>
