@@ -1,12 +1,20 @@
 import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { Heart, Brain } from "lucide-react";
 import { ReceivedThought } from "@workspace/api-client-react";
 import { MoodIcon } from "./mood-icon";
 import { useReactToThought, useUser } from "@/hooks/use-thoughts";
 import { cn } from "@/lib/utils";
 
-type Phase = "arriving" | "waiting" | "tapping" | "revealed" | "reacted" | "fading";
+// ─── Phase machine ─────────────────────────────────────────────────────────────
+// arriving  → bubble drifts in from above
+// waiting   → bubble breathes + shimmer + ripples; tap to proceed
+// tapping   → squash → rebound (tactile feedback)
+// expanding → shape morphs from sphere to card; glass fades
+// reading   → thought text is visible; buttons stagger in
+// reacted   → reaction submitted, confirmation shown
+// fading    → everything dissolves back to home
+type Phase = "arriving" | "waiting" | "tapping" | "expanding" | "reading" | "reacted" | "fading";
 
 interface Props {
   thought: ReceivedThought;
@@ -19,21 +27,29 @@ export function FloatingBubbleReceive({ thought, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>("arriving");
   const [reacted, setReacted] = useState<"felt_this" | "made_think" | null>(null);
 
+  const isBubble = phase === "arriving" || phase === "waiting" || phase === "tapping";
+  const isExpanding = phase === "expanding";
+  const isCard = phase === "reading" || phase === "reacted";
+
+  // Morphing shape dimensions
+  const shapeW = isBubble ? 220 : 330;
+  const shapeH = isBubble ? 220 : 460;
+  const shapeR = isBubble ? 110 : 28;
+
   const handleBubbleTap = () => {
     if (phase !== "waiting") return;
     setPhase("tapping");
-    setTimeout(() => setPhase("revealed"), 520);
   };
 
   const handleReact = (type: "felt_this" | "made_think") => {
-    if (reacted || !userId || phase !== "revealed") return;
+    if (reacted || !userId || phase !== "reading") return;
     setReacted(type);
     setPhase("reacted");
     reactMutation.mutate({ id: thought.id, data: { userId, reactionType: type } });
     setTimeout(() => {
       setPhase("fading");
-      setTimeout(onClose, 750);
-    }, 2200);
+      setTimeout(onClose, 800);
+    }, 2400);
   };
 
   const handleSkip = () => {
@@ -41,310 +57,332 @@ export function FloatingBubbleReceive({ thought, onClose }: Props) {
     setTimeout(onClose, 700);
   };
 
-  const showBubble = phase === "arriving" || phase === "waiting" || phase === "tapping";
-  const showCard = phase === "revealed" || phase === "reacted";
-
   return (
     <motion.div
       className="fixed inset-0 z-50 flex items-center justify-center px-4"
       initial={{ opacity: 0 }}
       animate={{ opacity: phase === "fading" ? 0 : 1 }}
-      transition={{ duration: phase === "fading" ? 0.75 : 0.4 }}
+      transition={{ duration: phase === "fading" ? 0.8 : 0.45 }}
       onAnimationComplete={() => { if (phase === "fading") onClose(); }}
     >
-      {/* Dimmed backdrop — fades in with the arrival */}
+      {/* Backdrop */}
       <motion.div
         className="absolute inset-0"
         initial={{ opacity: 0 }}
-        animate={{
-          opacity: showBubble ? 1 : 1,
-          background: showCard
-            ? "radial-gradient(ellipse at center, rgba(18,8,45,0.82) 0%, rgba(4,2,14,0.97) 100%)"
-            : "radial-gradient(ellipse at center, rgba(14,6,38,0.72) 0%, rgba(4,2,14,0.92) 100%)",
-        }}
-        transition={{ duration: showCard ? 0.6 : 1.4 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 1.6 }}
         style={{
           backdropFilter: "blur(14px)",
           WebkitBackdropFilter: "blur(14px)",
+          background: isCard
+            ? "radial-gradient(ellipse at center, rgba(20,9,50,0.88) 0%, rgba(4,2,14,0.97) 100%)"
+            : "radial-gradient(ellipse at center, rgba(14,6,38,0.72) 0%, rgba(4,2,14,0.92) 100%)",
+          transition: "background 0.9s ease",
         }}
-        onClick={showCard ? handleSkip : undefined}
+        onClick={isCard ? handleSkip : undefined}
       />
 
-      <AnimatePresence mode="wait">
-        {/* ── BUBBLE PHASE ── */}
-        {showBubble && (
+      {/* ── ARRIVAL WRAPPER ── handles y-drift into screen */}
+      <motion.div
+        className="relative z-10"
+        initial={{ y: -420, opacity: 0, scale: 0.62 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
+        transition={
+          phase === "arriving"
+            ? { duration: 2.25, ease: [0.18, 0.58, 0.32, 1.0] }
+            : { duration: 0 }
+        }
+        onAnimationComplete={() => {
+          if (phase === "arriving") setPhase("waiting");
+        }}
+      >
+        {/* ── BREATHING / TAP WRAPPER ── handles scale pulse + tap squash */}
+        <motion.div
+          className="relative"
+          animate={
+            phase === "waiting"
+              ? { scale: [1, 1.034, 1, 0.970, 1] }
+              : phase === "tapping"
+              ? { scale: [1, 0.87, 1.08, 1.0] }
+              : { scale: 1 }
+          }
+          transition={
+            phase === "waiting"
+              ? { duration: 3.5, repeat: Infinity, ease: "easeInOut" }
+              : phase === "tapping"
+              ? { duration: 0.54, times: [0, 0.2, 0.68, 1.0], ease: "easeInOut" }
+              : {}
+          }
+          onAnimationComplete={() => {
+            if (phase === "tapping") setPhase("expanding");
+          }}
+          style={{ cursor: phase === "waiting" ? "pointer" : "default" }}
+          onClick={handleBubbleTap}
+        >
+          {/* Ambient glow behind the bubble */}
+          {isBubble && (
+            <div
+              className="absolute pointer-events-none"
+              style={{
+                inset: "-38%",
+                borderRadius: "50%",
+                background: "radial-gradient(circle, rgba(145,105,255,0.18) 0%, rgba(100,60,200,0.07) 42%, transparent 68%)",
+                filter: "blur(24px)",
+                zIndex: 0,
+              }}
+            />
+          )}
+
+          {/* Expanding ripple rings — waiting only */}
+          {phase === "waiting" && [0, 1, 2].map((i) => (
+            <motion.div
+              key={i}
+              className="absolute pointer-events-none"
+              style={{
+                width: 220, height: 220,
+                top: 0, left: 0,
+                borderRadius: "50%",
+                border: "1px solid rgba(160,120,255,0.20)",
+              }}
+              initial={{ scale: 1, opacity: 0.38 }}
+              animate={{ scale: 1.75 + i * 0.22, opacity: 0 }}
+              transition={{ duration: 2.7, repeat: Infinity, ease: "easeOut", delay: i * 0.85 }}
+            />
+          ))}
+
+          {/* ── MORPHING SHAPE ── sphere → card */}
           <motion.div
-            key="bubble"
-            className="relative z-10 flex flex-col items-center select-none"
-            style={{ cursor: phase === "waiting" ? "pointer" : "default" }}
-            initial={{ y: -400, opacity: 0, scale: 0.65 }}
-            animate={
-              phase === "arriving"
-                ? { y: 0, opacity: 1, scale: 1 }
-                : phase === "tapping"
-                ? { scale: [1, 0.86, 0.86], opacity: [1, 1, 0] }
-                : { y: 0, opacity: 1, scale: 1 }
-            }
+            className="relative overflow-hidden"
+            animate={{ width: shapeW, height: shapeH, borderRadius: shapeR }}
             transition={
-              phase === "arriving"
-                ? { duration: 2.2, ease: [0.18, 0.58, 0.32, 1.0] }
-                : phase === "tapping"
-                ? { duration: 0.48, times: [0, 0.32, 1], ease: "easeInOut" }
+              isExpanding
+                ? { duration: 0.78, ease: [0.22, 0.61, 0.36, 1.0] }
                 : { duration: 0 }
             }
             onAnimationComplete={() => {
-              if (phase === "arriving") setPhase("waiting");
+              if (phase === "expanding") setPhase("reading");
             }}
-            onClick={handleBubbleTap}
+            style={{ position: "relative", zIndex: 1 }}
           >
-            {/* Ripple rings — only in waiting */}
-            {phase === "waiting" && [0, 1, 2].map((i) => (
-              <motion.div
-                key={i}
-                className="absolute rounded-full"
-                style={{
-                  width: 220, height: 220,
-                  border: "1px solid rgba(160,120,255,0.18)",
-                  top: 0, left: 0,
-                }}
-                initial={{ scale: 1, opacity: 0.4 }}
-                animate={{ scale: 1.72 + i * 0.2, opacity: 0 }}
-                transition={{
-                  duration: 2.6,
-                  repeat: Infinity,
-                  ease: "easeOut",
-                  delay: i * 0.82,
-                }}
-              />
-            ))}
-
-            {/* Bubble shell — breathing when waiting */}
+            {/* ── GLASS LAYERS (fade out during expanding) ── */}
             <motion.div
-              className="relative rounded-full"
-              style={{ width: 220, height: 220 }}
-              animate={phase === "waiting" ? { scale: [1, 1.032, 1, 0.972, 1] } : { scale: 1 }}
-              transition={phase === "waiting" ? { duration: 3.4, repeat: Infinity, ease: "easeInOut" } : {}}
+              className="absolute inset-0"
+              animate={{ opacity: isBubble ? 1 : 0 }}
+              transition={{ duration: 0.45, delay: isExpanding ? 0.12 : 0 }}
             >
-              {/* Outer ambient glow */}
-              <div className="absolute rounded-full pointer-events-none" style={{
-                inset: "-38%",
-                background: "radial-gradient(circle, rgba(140,100,255,0.16) 0%, rgba(100,60,200,0.06) 45%, transparent 68%)",
-                filter: "blur(22px)",
-              }} />
-
               {/* Rim illumination */}
-              <div className="absolute inset-0 rounded-full" style={{
-                background: "radial-gradient(circle at 50% 50%, transparent 44%, rgba(175,145,255,0.22) 80%, rgba(255,255,255,0.16) 100%)",
+              <div className="absolute inset-0" style={{
+                background: "radial-gradient(circle at 50% 50%, transparent 44%, rgba(178,148,255,0.23) 81%, rgba(255,255,255,0.17) 100%)",
               }} />
 
               {/* Glass body */}
-              <div className="absolute inset-0 rounded-full" style={{
-                background: "radial-gradient(circle at 32% 28%, rgba(255,255,255,0.20) 0%, rgba(155,115,255,0.11) 30%, rgba(95,65,195,0.07) 62%, rgba(45,25,95,0.04) 100%)",
-                border: "1px solid rgba(200,170,255,0.30)",
+              <div className="absolute inset-0" style={{
+                background: "radial-gradient(circle at 32% 28%, rgba(255,255,255,0.21) 0%, rgba(155,115,255,0.12) 30%, rgba(92,62,192,0.07) 62%, rgba(42,22,92,0.04) 100%)",
+                border: "1px solid rgba(200,170,255,0.31)",
                 boxShadow: [
-                  "inset 0 1px 0 rgba(255,255,255,0.28)",
+                  "inset 0 1px 0 rgba(255,255,255,0.30)",
                   "inset 0 -1px 0 rgba(0,0,0,0.18)",
-                  "inset 0 0 32px rgba(155,115,255,0.06)",
-                  "0 0 55px rgba(130,90,255,0.20)",
+                  "inset 0 0 34px rgba(152,112,255,0.07)",
+                  "0 0 58px rgba(128,88,255,0.22)",
                 ].join(", "),
               }} />
 
-              {/* Shimmer sweep — only in waiting */}
+              {/* Shimmer sweep — waiting only */}
               {phase === "waiting" && (
-                <div className="absolute inset-0 rounded-full overflow-hidden">
+                <div className="absolute inset-0 overflow-hidden">
                   <motion.div
                     style={{
                       position: "absolute",
-                      top: "-60%",
-                      left: "-40%",
-                      width: "45%",
-                      height: "220%",
-                      background: "linear-gradient(108deg, transparent 0%, rgba(255,255,255,0.10) 50%, transparent 100%)",
+                      top: "-60%", left: "-40%",
+                      width: "44%", height: "220%",
+                      background: "linear-gradient(108deg, transparent 0%, rgba(255,255,255,0.11) 50%, transparent 100%)",
                       transform: "skewX(-18deg)",
                     }}
                     initial={{ x: "-100%" }}
-                    animate={{ x: "680%" }}
-                    transition={{
-                      duration: 3.8,
-                      repeat: Infinity,
-                      repeatDelay: 2.0,
-                      ease: [0.4, 0, 0.6, 1],
-                    }}
+                    animate={{ x: "700%" }}
+                    transition={{ duration: 4.0, repeat: Infinity, repeatDelay: 2.2, ease: [0.4, 0, 0.6, 1] }}
                   />
                 </div>
               )}
 
               {/* Primary specular highlight */}
-              <div className="absolute rounded-full" style={{
-                width: "36%", height: "18%",
-                top: "10%", left: "13%",
-                background: "radial-gradient(ellipse, rgba(255,255,255,0.86) 0%, rgba(255,255,255,0.28) 55%, transparent 100%)",
+              <div className="absolute" style={{
+                width: "36%", height: "18%", top: "10%", left: "13%",
+                borderRadius: "50%",
+                background: "radial-gradient(ellipse, rgba(255,255,255,0.88) 0%, rgba(255,255,255,0.28) 55%, transparent 100%)",
                 filter: "blur(1.5px)",
                 transform: "rotate(-32deg)",
               }} />
-              {/* Tiny sharp glint */}
-              <div className="absolute rounded-full" style={{
-                width: "10.5%", height: "5.5%",
-                top: "7%", left: "26%",
-                background: "rgba(255,255,255,0.78)",
+              {/* Tiny glint */}
+              <div className="absolute" style={{
+                width: "10.5%", height: "5.5%", top: "7%", left: "26%",
+                borderRadius: "50%",
+                background: "rgba(255,255,255,0.80)",
                 filter: "blur(0.5px)",
                 transform: "rotate(-32deg)",
               }} />
               {/* Secondary lower-right reflection */}
-              <div className="absolute rounded-full" style={{
-                width: "26%", height: "12%",
-                bottom: "13%", right: "10%",
+              <div className="absolute" style={{
+                width: "26%", height: "12%", bottom: "13%", right: "10%",
+                borderRadius: "50%",
                 background: "radial-gradient(ellipse, rgba(255,255,255,0.30) 0%, transparent 100%)",
                 filter: "blur(3px)",
                 transform: "rotate(-32deg)",
               }} />
 
-              {/* Text inside bubble */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 z-10">
-                {phase === "waiting" && (
-                  <motion.div
-                    className="flex flex-col items-center gap-2"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 1.0, delay: 0.4 }}
-                  >
-                    <span className="text-white/38 text-[10px] tracking-[0.34em] uppercase">tap to open</span>
-                    <div className="w-6 h-px bg-white/14" />
-                    <span className="text-white/20 text-[9px] tracking-widest">from the void</span>
-                  </motion.div>
-                )}
-              </div>
+              {/* Tap flash — brief luminous pulse on compress */}
+              {phase === "tapping" && (
+                <motion.div
+                  className="absolute inset-0"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: [0, 0.30, 0] }}
+                  transition={{ duration: 0.38, ease: "easeOut" }}
+                  style={{
+                    background: "radial-gradient(circle at 48% 42%, rgba(255,255,255,0.55) 0%, transparent 62%)",
+                  }}
+                />
+              )}
             </motion.div>
-          </motion.div>
-        )}
 
-        {/* ── REVEALED PHASE ── */}
-        {showCard && (
-          <motion.div
-            key="revealed"
-            className="relative z-10 w-full max-w-sm"
-            initial={{ opacity: 0, scale: 0.86, y: 14 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.94, y: -18 }}
-            transition={{ duration: 0.72, ease: [0.22, 0.61, 0.36, 1] }}
-          >
-            <div
-              className="rounded-3xl p-8 sm:p-10 flex flex-col items-center text-center"
+            {/* ── CARD BACKGROUND (fades in during expanding) ── */}
+            <motion.div
+              className="absolute inset-0"
+              animate={{ opacity: isBubble ? 0 : 1 }}
+              transition={{ duration: 0.55, delay: isExpanding ? 0.28 : 0 }}
               style={{
-                background: "rgba(12,7,30,0.95)",
-                border: "1px solid rgba(175,138,255,0.18)",
-                boxShadow: [
-                  "0 0 90px rgba(110,70,255,0.12)",
-                  "0 28px 90px rgba(0,0,0,0.70)",
-                ].join(", "),
+                background: "rgba(9, 5, 24, 0.96)",
+                border: "1px solid rgba(175,140,255,0.16)",
+                boxShadow: "0 0 90px rgba(105,65,255,0.12), 0 32px 90px rgba(0,0,0,0.72)",
               }}
+            />
+
+            {/* ── BUBBLE WAITING TEXT ── */}
+            <motion.div
+              className="absolute inset-0 flex flex-col items-center justify-center gap-2.5"
+              animate={{ opacity: isBubble && phase === "waiting" ? 1 : 0 }}
+              transition={{ duration: phase === "waiting" ? 1.0 : 0.25, delay: phase === "waiting" ? 0.5 : 0 }}
             >
+              <span className="text-white/36 text-[10px] tracking-[0.36em] uppercase">tap to open</span>
+              <div className="w-5 h-px" style={{ background: "rgba(255,255,255,0.13)" }} />
+              <span className="text-white/20 text-[9px] tracking-widest">from the void</span>
+            </motion.div>
+
+            {/* ── THOUGHT CONTENT ── fades in after expand */}
+            <motion.div
+              className="absolute inset-0 flex flex-col items-center text-center overflow-hidden"
+              style={{ padding: "36px 28px 28px" }}
+              animate={{ opacity: isCard ? 1 : 0 }}
+              transition={{ duration: 0.5, delay: isCard ? 0.1 : 0 }}
+            >
+              {/* Label */}
               <motion.p
                 initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.22, duration: 0.65 }}
-                className="text-[10px] font-medium tracking-[0.32em] text-white/28 uppercase mb-6"
+                animate={{ opacity: isCard ? 1 : 0 }}
+                transition={{ delay: 0.25, duration: 0.65 }}
+                className="text-[10px] font-medium tracking-[0.34em] text-white/26 uppercase mb-5 shrink-0"
               >
                 anonymous · from the void
               </motion.p>
 
+              {/* Mood */}
               {thought.mood && (
                 <motion.div
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.35, duration: 0.55 }}
-                  className="mb-4"
+                  initial={{ opacity: 0, y: 5 }}
+                  animate={{ opacity: isCard ? 1 : 0, y: isCard ? 0 : 5 }}
+                  transition={{ delay: 0.38, duration: 0.55 }}
+                  className="mb-3 shrink-0"
                 >
                   <MoodIcon moodId={thought.mood} showLabel />
                 </motion.div>
               )}
 
+              {/* Thought text — blur-to-sharp fade */}
               <motion.p
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.45, duration: 0.85, ease: "easeOut" }}
-                className="text-2xl sm:text-3xl leading-relaxed text-white/90 mb-8"
+                animate={{
+                  opacity: isCard ? 1 : 0,
+                  y: isCard ? 0 : 10,
+                  filter: isCard ? "blur(0px)" : "blur(5px)",
+                }}
+                transition={{ delay: 0.48, duration: 1.0, ease: "easeOut" }}
+                className="flex-1 flex items-center justify-center text-2xl leading-relaxed text-white/90"
                 style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
               >
                 "{thought.content}"
               </motion.p>
 
-              {/* Reaction buttons */}
+              {/* Reactions — staggered in late, giving linger time */}
               <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.72, duration: 0.6 }}
-                className="flex gap-3 w-full"
+                animate={{ opacity: isCard ? 1 : 0, y: isCard ? 0 : 8 }}
+                transition={{ delay: 1.7, duration: 0.7 }}
+                className="w-full shrink-0 mt-4"
               >
-                <button
-                  onClick={() => handleReact("felt_this")}
-                  disabled={!!reacted}
-                  className={cn(
-                    "flex-1 flex flex-col items-center gap-2.5 py-4 px-3 rounded-2xl transition-all duration-300 border",
-                    reacted === "felt_this"
-                      ? "bg-pink-500/20 border-pink-500/40 text-pink-300"
-                      : reacted
-                      ? "opacity-30 bg-white/3 border-white/5 text-white/30"
-                      : "bg-white/5 border-white/8 hover:bg-white/10 hover:border-white/20 text-white/60 cursor-pointer"
-                  )}
-                >
-                  <Heart className={cn("w-6 h-6 transition-all duration-500", reacted === "felt_this" ? "fill-pink-400 text-pink-400 scale-110" : "")} />
-                  <div>
-                    <div className="text-xs font-medium tracking-wide">Felt this</div>
-                    <div className="text-[10px] opacity-50 mt-0.5">
-                      {thought.feltThisCount + (reacted === "felt_this" ? 1 : 0)}
+                <div className="flex gap-2.5 w-full">
+                  <button
+                    onClick={() => handleReact("felt_this")}
+                    disabled={!!reacted}
+                    className={cn(
+                      "flex-1 flex flex-col items-center gap-1.5 py-3.5 rounded-2xl transition-all duration-400 border",
+                      reacted === "felt_this"
+                        ? "bg-pink-500/20 border-pink-500/35 text-pink-300"
+                        : reacted
+                        ? "opacity-25 bg-white/3 border-white/5 text-white/25"
+                        : "bg-white/5 border-white/8 hover:bg-white/9 hover:border-white/16 text-white/52 cursor-pointer"
+                    )}
+                  >
+                    <Heart className={cn("w-5 h-5 transition-all duration-500", reacted === "felt_this" ? "fill-pink-400 text-pink-400" : "")} />
+                    <div>
+                      <div className="text-[11px] font-medium tracking-wide">Felt this</div>
+                      <div className="text-[10px] opacity-40 mt-0.5">{thought.feltThisCount + (reacted === "felt_this" ? 1 : 0)}</div>
                     </div>
-                  </div>
-                </button>
+                  </button>
 
-                <button
-                  onClick={() => handleReact("made_think")}
-                  disabled={!!reacted}
-                  className={cn(
-                    "flex-1 flex flex-col items-center gap-2.5 py-4 px-3 rounded-2xl transition-all duration-300 border",
-                    reacted === "made_think"
-                      ? "bg-violet-500/20 border-violet-500/40 text-violet-300"
-                      : reacted
-                      ? "opacity-30 bg-white/3 border-white/5 text-white/30"
-                      : "bg-white/5 border-white/8 hover:bg-white/10 hover:border-white/20 text-white/60 cursor-pointer"
-                  )}
-                >
-                  <Brain className={cn("w-6 h-6 transition-all duration-500", reacted === "made_think" ? "text-violet-400 scale-110" : "")} />
-                  <div>
-                    <div className="text-xs font-medium tracking-wide">Made me think</div>
-                    <div className="text-[10px] opacity-50 mt-0.5">
-                      {thought.madeThinkCount + (reacted === "made_think" ? 1 : 0)}
+                  <button
+                    onClick={() => handleReact("made_think")}
+                    disabled={!!reacted}
+                    className={cn(
+                      "flex-1 flex flex-col items-center gap-1.5 py-3.5 rounded-2xl transition-all duration-400 border",
+                      reacted === "made_think"
+                        ? "bg-violet-500/20 border-violet-500/35 text-violet-300"
+                        : reacted
+                        ? "opacity-25 bg-white/3 border-white/5 text-white/25"
+                        : "bg-white/5 border-white/8 hover:bg-white/9 hover:border-white/16 text-white/52 cursor-pointer"
+                    )}
+                  >
+                    <Brain className={cn("w-5 h-5 transition-all duration-500", reacted === "made_think" ? "text-violet-400" : "")} />
+                    <div>
+                      <div className="text-[11px] font-medium tracking-wide">Made me think</div>
+                      <div className="text-[10px] opacity-40 mt-0.5">{thought.madeThinkCount + (reacted === "made_think" ? 1 : 0)}</div>
                     </div>
-                  </div>
-                </button>
+                  </button>
+                </div>
+
+                {!reacted && (
+                  <motion.button
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: isCard ? 1 : 0 }}
+                    transition={{ delay: 2.4, duration: 0.65 }}
+                    onClick={handleSkip}
+                    className="mt-4 w-full text-[10px] tracking-widest uppercase text-white/18 hover:text-white/38 transition-colors"
+                  >
+                    Let it drift away
+                  </motion.button>
+                )}
+
+                {reacted && (
+                  <motion.p
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.55 }}
+                    className="mt-3.5 text-[11px] tracking-wider text-white/36 text-center"
+                  >
+                    {reacted === "felt_this" ? "You resonated with this." : "You let it make you think."}
+                  </motion.p>
+                )}
               </motion.div>
-
-              {!reacted && (
-                <motion.button
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 1.05, duration: 0.55 }}
-                  onClick={handleSkip}
-                  className="mt-5 text-[10px] tracking-widest uppercase text-white/20 hover:text-white/42 transition-colors"
-                >
-                  Let it drift away
-                </motion.button>
-              )}
-
-              {reacted && (
-                <motion.p
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5 }}
-                  className="mt-4 text-[11px] tracking-wider text-white/40"
-                >
-                  {reacted === "felt_this" ? "You resonated with this." : "You let it make you think."}
-                </motion.p>
-              )}
-            </div>
+            </motion.div>
           </motion.div>
-        )}
-      </AnimatePresence>
+        </motion.div>
+      </motion.div>
     </motion.div>
   );
 }
