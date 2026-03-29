@@ -19,13 +19,15 @@ type Phase = "arriving" | "waiting" | "tapping" | "expanding" | "reading" | "rea
 interface Props {
   thought: ReceivedThought;
   onClose: () => void;
+  onReceiveAnother?: () => void;
 }
 
-export function FloatingBubbleReceive({ thought, onClose }: Props) {
+export function FloatingBubbleReceive({ thought, onClose, onReceiveAnother }: Props) {
   const { userId } = useUser();
   const reactMutation = useReactToThought();
   const [phase, setPhase] = useState<Phase>("arriving");
   const [reacted, setReacted] = useState<"felt_this" | "made_think" | null>(null);
+  const [reported, setReported] = useState(false);
 
   const isBubble = phase === "arriving" || phase === "waiting" || phase === "tapping";
   const isExpanding = phase === "expanding";
@@ -55,6 +57,25 @@ export function FloatingBubbleReceive({ thought, onClose }: Props) {
   const handleSkip = () => {
     setPhase("fading");
     setTimeout(onClose, 700);
+  };
+
+  const handleReceiveAnother = () => {
+    setPhase("fading");
+    setTimeout(() => onReceiveAnother?.(), 550);
+  };
+
+  const handleReport = async () => {
+    if (reported || !userId) return;
+    setReported(true);
+    try {
+      await fetch(`/api/thoughts/${thought.id}/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+    } catch {
+      // silent
+    }
   };
 
   return (
@@ -357,15 +378,27 @@ export function FloatingBubbleReceive({ thought, onClose }: Props) {
                 </div>
 
                 {!reacted && (
-                  <motion.button
+                  <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: isCard ? 1 : 0 }}
                     transition={{ delay: 2.4, duration: 0.65 }}
-                    onClick={handleSkip}
-                    className="mt-4 w-full text-[10px] tracking-widest uppercase text-white/18 hover:text-white/38 transition-colors"
+                    className="mt-4 flex gap-2.5"
                   >
-                    Let it drift away
-                  </motion.button>
+                    {onReceiveAnother && (
+                      <button
+                        onClick={handleReceiveAnother}
+                        className="flex-1 text-[10px] tracking-widest uppercase text-white/30 hover:text-white/55 transition-colors py-1"
+                      >
+                        Receive another
+                      </button>
+                    )}
+                    <button
+                      onClick={handleSkip}
+                      className="flex-1 text-[10px] tracking-widest uppercase text-white/18 hover:text-white/38 transition-colors py-1"
+                    >
+                      Let it drift
+                    </button>
+                  </motion.div>
                 )}
 
                 {reacted && (
@@ -378,6 +411,18 @@ export function FloatingBubbleReceive({ thought, onClose }: Props) {
                     {reacted === "felt_this" ? "You resonated with this." : "You let it make you think."}
                   </motion.p>
                 )}
+
+                {/* Report — very subtle, appears last */}
+                <motion.button
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: isCard ? (reported ? 0.25 : 0.09) : 0 }}
+                  transition={{ delay: 3.2, duration: 0.8 }}
+                  onClick={handleReport}
+                  disabled={reported}
+                  className="mt-5 w-full text-[9px] tracking-widest uppercase text-white/50 hover:text-white/30 transition-colors cursor-pointer disabled:cursor-default"
+                >
+                  {reported ? "Reported" : "Flag this thought"}
+                </motion.button>
               </motion.div>
             </motion.div>
           </motion.div>

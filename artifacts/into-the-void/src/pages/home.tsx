@@ -18,6 +18,7 @@ export default function Home() {
   const [content, setContent] = useState("");
   const [selectedMood, setSelectedMood] = useState<MoodId | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [receivedThought, setReceivedThought] = useState<ReceivedThought | null>(null);
   const [receiveError, setReceiveError] = useState<string | null>(null);
 
@@ -39,6 +40,7 @@ export default function Home() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!content.trim() || !userId) return;
+    setSubmitError(null);
     submitMutation.mutate(
       { data: { userId, content: content.trim(), mood: selectedMood } },
       {
@@ -47,6 +49,14 @@ export default function Home() {
           setSelectedMood(null);
           setIsSuccess(true);
           setTimeout(() => setIsSuccess(false), 3500);
+        },
+        onError: (err: any) => {
+          if (err.status === 422) {
+            setSubmitError("Please keep thoughts kind.");
+          } else {
+            setSubmitError("Couldn't release that one. Try again.");
+          }
+          setTimeout(() => setSubmitError(null), 4000);
         },
       }
     );
@@ -187,8 +197,20 @@ export default function Home() {
           </div>
 
           <AnimatePresence>
-            {isSuccess && (
+            {submitError ? (
               <motion.p
+                key="submit-error"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.5 }}
+                className="absolute -bottom-9 left-0 right-0 text-center text-xs tracking-wide text-red-400/70"
+              >
+                {submitError}
+              </motion.p>
+            ) : isSuccess && (
+              <motion.p
+                key="submit-success"
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
@@ -363,6 +385,10 @@ export default function Home() {
           <FloatingBubbleReceive
             thought={receivedThought}
             onClose={() => setReceivedThought(null)}
+            onReceiveAnother={!isOverLimit ? () => {
+              setReceivedThought(null);
+              setTimeout(() => handleReceive(), 550);
+            } : undefined}
           />
         )}
       </AnimatePresence>

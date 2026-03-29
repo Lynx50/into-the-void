@@ -96,6 +96,44 @@ function Starfield() {
   );
 }
 
+// ─── Twinkle Stars ────────────────────────────────────────────────────────────
+
+function TwinkleStars() {
+  const stars = useMemo(() =>
+    Array.from({ length: 7 }, (_, i) => ({
+      id: i,
+      x: 6 + Math.random() * 88,
+      y: 5 + Math.random() * 90,
+      size: 0.9 + Math.random() * 1.2,
+      lo: 0.05 + Math.random() * 0.10,
+      hi: 0.38 + Math.random() * 0.34,
+      dur: 1.6 + Math.random() * 2.2,
+      delay: Math.random() * 7,
+      gap: 4 + Math.random() * 6,
+    })),
+  []);
+
+  return (
+    <div className="absolute inset-0 pointer-events-none">
+      {stars.map((s) => (
+        <motion.div
+          key={s.id}
+          className="absolute rounded-full bg-white"
+          style={{ left: `${s.x}%`, top: `${s.y}%`, width: s.size, height: s.size }}
+          animate={{ opacity: [s.lo, s.hi, s.lo] }}
+          transition={{
+            duration: s.dur,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: s.delay,
+            repeatDelay: s.gap,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 // ─── Glass Sphere Shell ───────────────────────────────────────────────────────
 
 interface GlassSphereProps {
@@ -354,6 +392,9 @@ export function AnimatedBackground() {
 
       {/* Canvas starfield */}
       <Starfield />
+
+      {/* Subtly twinkling individual stars */}
+      <TwinkleStars />
 
       {/* Depth-layered glass sphere bubbles */}
       {bubbles.map((b) => {

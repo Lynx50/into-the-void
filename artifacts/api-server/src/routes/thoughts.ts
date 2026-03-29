@@ -14,6 +14,17 @@ const router: IRouter = Router();
 
 const DAILY_RECEIVE_LIMIT = 3;
 
+// ─── Content filter ────────────────────────────────────────────────────────────
+const BLOCKED = [
+  "nigger","nigga","faggot"," fag ","chink","spic","kike","wetback","tranny",
+  "kill yourself","kys","go die","i want to die","end my life","suicide","self harm",
+  "bomb","shooting","massacre",
+];
+function isBlocked(text: string): boolean {
+  const t = text.toLowerCase();
+  return BLOCKED.some((w) => t.includes(w));
+}
+
 router.post("/thoughts", async (req, res) => {
   const parsed = SubmitThoughtBody.safeParse(req.body);
   if (!parsed.success) {
@@ -25,6 +36,11 @@ router.post("/thoughts", async (req, res) => {
 
   if (!content || content.trim().length === 0) {
     res.status(400).json({ error: "Content cannot be empty" });
+    return;
+  }
+
+  if (isBlocked(content)) {
+    res.status(422).json({ error: "Please keep thoughts kind. This one couldn't be released." });
     return;
   }
 
@@ -244,6 +260,41 @@ router.post("/thoughts/:id/react", async (req, res) => {
     madeThinkCount: updated.madeThinkCount,
     createdAt: updated.createdAt.toISOString(),
   });
+});
+
+// ─── Report ────────────────────────────────────────────────────────────────────
+router.post("/thoughts/:id/report", async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid thought id" });
+    return;
+  }
+  const userId = req.body?.userId;
+  if (!userId || typeof userId !== "string") {
+    res.status(400).json({ error: "userId required" });
+    return;
+  }
+
+  const [existing] = await db
+    .select()
+    .from(reactionsTable)
+    .where(
+      and(
+        eq(reactionsTable.thoughtId, id),
+        eq(reactionsTable.userId, userId),
+        eq(reactionsTable.reactionType, "report"),
+      ),
+    )
+    .limit(1);
+
+  if (existing) {
+    res.status(200).json({ reported: true });
+    return;
+  }
+
+  await db.insert(reactionsTable).values({ userId, thoughtId: id, reactionType: "report" });
+
+  res.status(201).json({ reported: true });
 });
 
 export default router;

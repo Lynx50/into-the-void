@@ -1,0 +1,182 @@
+Finalize my app "Into the Void" for release.
+
+GOAL:
+Create a simple, calm, emotionally engaging app with a clear daily loop, subtle feedback, and a polished user experience.
+
+Do NOT add unnecessary features.
+Focus on clarity, emotion, and simplicity.
+
+==================================================
+1. DAILY LOOP + RETENTION SYSTEM (CORE FEATURE)
+==================================================
+
+Add a daily usage system:
+
+- Users get 3 receives per day
+- Display under Receive button:
+  "3 / 3 thoughts today"
+
+- Each time user taps receive:
+  decrease count
+
+- Reset daily (24 hours)
+
+--------------------------------------------------
+
+Unlock system:
+
+- User must submit at least 1 thought before receiving
+- If not:
+  show message:
+  "Release a thought to receive one"
+
+--------------------------------------------------
+
+Return hook:
+
+When user opens the app, show:
+
+- "Your thought reached X people"
+- "X people felt this ❤️"
+
+Keep this:
+- subtle
+- calm
+- not intrusive
+
+==================================================
+2. RECEIVE EXPERIENCE (FINAL POLISH)
+==================================================
+
+Keep existing system but refine:
+
+- Add slight glow bloom when thought fully appears
+- Add soft background dim after reveal
+- Add subtle breathing glow around the bubble/text
+
+- Add very faint shimmer across bubble before tap
+- Improve tap feedback:
+  slight squash + glow pulse
+
+--------------------------------------------------
+
+Post reveal actions (fade in after 1–2 seconds):
+
+- ❤️ That helped
+- 💭 I relate
+- 🔁 Another thought
+
+Keep them:
+- minimal
+- soft
+- low contrast initially
+
+==================================================
+3. MY ORBIT (FINAL TOUCH)
+==================================================
+
+Ensure:
+
+- No text visible on bubbles initially
+- Text only appears when tapped
+
+- Bubble sizes reflect engagement
+- Add subtle floating motion
+- Add slight glow increase on hover/tap
+
+- When opened:
+  show:
+    - thought text
+    - ❤️ count
+    - 💭 count
+    - optional "Seen X times"
+
+==================================================
+4. BUBBLE SYSTEM FINAL POLISH
+==================================================
+
+- Ensure 3 depth layers:
+  background / mid / foreground
+
+- Improve glass effect:
+  - clearer edge rim
+  - visible highlight
+  - soft inner gradient
+
+- Motion:
+  - different speeds
+  - slight wobble
+  - no uniform movement
+
+- Add 1–2 larger slow bubbles on home screen
+
+==================================================
+5. STARFIELD FINAL POLISH
+==================================================
+
+- Keep starfield subtle
+
+- Add:
+  - slight brightness variation
+  - occasional very faint twinkle (few stars only)
+
+- Do NOT:
+  - make it busy
+  - add strong animation
+
+==================================================
+6. HOME SCREEN FINAL TOUCHES
+==================================================
+
+- Keep tagline:
+  "Let it go… see what’s out there."
+
+- Improve RECEIVE button:
+  - clean modern font
+  - slight letter spacing
+  - soft glow pulse
+
+- Keep:
+  "A thought is waiting for you…"
+
+==================================================
+7. MICRO-UX POLISH
+==================================================
+
+- All animations use smooth easing
+- No abrupt transitions
+- Keep motion calm and slow
+
+- Add soft fade between screens
+- Keep UI minimal and uncluttered
+
+==================================================
+8. SAFETY + CONTENT FILTER (BASIC)
+==================================================
+
+- Add basic content filtering:
+  - block offensive or harmful phrases
+
+- Add simple report option on thoughts
+
+Keep it minimal.
+
+==================================================
+9. FINAL EXPERIENCE GOAL
+==================================================
+
+The app should feel like:
+
+"a quiet place where you release a thought and receive one back, without pressure or noise"
+
+Users should:
+- feel calm
+- feel curious
+- feel slightly understood
+- come back later without being forced
+
+Avoid:
+- social media feel
+- gamification
+- clutter
+- noise
