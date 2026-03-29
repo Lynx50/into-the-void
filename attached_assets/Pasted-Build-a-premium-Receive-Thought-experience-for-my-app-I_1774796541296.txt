@@ -1,0 +1,183 @@
+Build a premium "Receive Thought" experience for my app "Into the Void".
+
+MAIN GOAL:
+Make receiving a thought feel emotional, calm, and slightly magical — not instant or mechanical.
+
+This is the most important interaction in the app.
+
+==================================================
+1. RECEIVE BUTTON INTERACTION
+==================================================
+
+When user taps "Receive":
+
+- Button should softly pulse or glow before activation
+- Add slight scale animation (grow then settle)
+- Trigger a smooth transition into receive mode
+
+Do NOT:
+- instantly show the thought
+- make it feel fast or abrupt
+
+==================================================
+2. CREATE A FLOATING BUBBLE ARRIVAL
+==================================================
+
+After tapping receive:
+
+- A single bubble should appear from off-screen (top or side)
+- It should drift slowly into the center of the screen
+
+Bubble behavior:
+- smooth floating motion
+- slight wobble
+- slow easing movement
+- feels like it's arriving naturally
+
+Add:
+- soft glow around the bubble
+- subtle focus effect (background slightly dims)
+
+==================================================
+3. BUILD ANTICIPATION (VERY IMPORTANT)
+==================================================
+
+Before revealing the thought:
+
+- Bubble pauses in the center
+- Slight breathing animation (gentle scale in/out)
+- Add faint shimmer or light movement across surface
+
+Duration:
+- ~1.5 to 2.5 seconds
+
+Optional:
+- soft pulse ripple around the bubble
+
+This moment should feel like:
+"something is about to be revealed"
+
+==================================================
+4. TAP TO REVEAL (USER ACTION)
+==================================================
+
+User must tap the bubble to reveal the thought.
+
+On tap:
+
+- Bubble reacts (slight compression or ripple)
+- Then transitions into reveal
+
+Do NOT:
+- auto reveal without interaction
+
+==================================================
+5. THOUGHT REVEAL ANIMATION
+==================================================
+
+When bubble is tapped:
+
+Option A (recommended):
+- Bubble softly expands
+- Surface fades slightly
+- Thought text fades in inside the bubble
+
+Option B:
+- Bubble gently "pops" into a soft glow
+- Text appears in place where bubble was
+
+Animation style:
+- smooth
+- soft easing
+- no sharp transitions
+
+==================================================
+6. DISPLAY THE THOUGHT
+==================================================
+
+Thought text should:
+
+- appear centered
+- use clean readable font
+- fade in smoothly (not instant)
+- feel calm and readable
+
+Keep:
+- no clutter
+- no UI noise
+
+==================================================
+7. POST-REVEAL OPTIONS
+==================================================
+
+After reading, show subtle options:
+
+- ❤️ "That helped"
+- 💭 "I relate"
+- 🔁 "Send another"
+
+Keep these:
+- minimal
+- soft
+- not intrusive
+
+Optional:
+- reactions influence how far thoughts travel in system
+
+==================================================
+8. RETURN FLOW
+==================================================
+
+After interaction:
+
+- user can tap "Send another"
+- or bubble gently fades away
+- screen returns to home state
+
+==================================================
+9. SOUND (OPTIONAL BUT POWERFUL)
+==================================================
+
+If sound is enabled:
+
+- soft ambient "whoosh" when bubble arrives
+- very subtle pop or shimmer on reveal
+
+Keep:
+- very quiet
+- calming
+- not distracting
+
+==================================================
+10. EMOTIONAL TARGET
+==================================================
+
+The experience should feel like:
+
+- receiving a message from nowhere
+- a quiet moment of connection
+- curiosity → pause → reveal
+
+NOT like:
+
+- opening a notification
+- loading content
+- fast social media interaction
+
+==================================================
+FINAL RESULT
+==================================================
+
+The user should feel:
+
+"I wonder what I’m about to see…"
+
+→ pause
+
+→ tap
+
+→ small emotional reaction
+
+→ stays for a moment
+
+This interaction should make users want to press "Receive" again later.

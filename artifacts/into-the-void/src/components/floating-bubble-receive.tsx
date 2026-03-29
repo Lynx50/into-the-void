@@ -6,7 +6,7 @@ import { MoodIcon } from "./mood-icon";
 import { useReactToThought, useUser } from "@/hooks/use-thoughts";
 import { cn } from "@/lib/utils";
 
-type Phase = "floating" | "popping" | "revealed" | "reacted" | "fading";
+type Phase = "arriving" | "waiting" | "tapping" | "revealed" | "reacted" | "fading";
 
 interface Props {
   thought: ReceivedThought;
@@ -16,13 +16,13 @@ interface Props {
 export function FloatingBubbleReceive({ thought, onClose }: Props) {
   const { userId } = useUser();
   const reactMutation = useReactToThought();
-  const [phase, setPhase] = useState<Phase>("floating");
+  const [phase, setPhase] = useState<Phase>("arriving");
   const [reacted, setReacted] = useState<"felt_this" | "made_think" | null>(null);
 
   const handleBubbleTap = () => {
-    if (phase !== "floating") return;
-    setPhase("popping");
-    setTimeout(() => setPhase("revealed"), 400);
+    if (phase !== "waiting") return;
+    setPhase("tapping");
+    setTimeout(() => setPhase("revealed"), 520);
   };
 
   const handleReact = (type: "felt_this" | "made_think") => {
@@ -32,124 +32,250 @@ export function FloatingBubbleReceive({ thought, onClose }: Props) {
     reactMutation.mutate({ id: thought.id, data: { userId, reactionType: type } });
     setTimeout(() => {
       setPhase("fading");
-      setTimeout(onClose, 800);
-    }, 1800);
+      setTimeout(onClose, 750);
+    }, 2200);
   };
 
   const handleSkip = () => {
     setPhase("fading");
-    setTimeout(onClose, 600);
+    setTimeout(onClose, 700);
   };
 
+  const showBubble = phase === "arriving" || phase === "waiting" || phase === "tapping";
+  const showCard = phase === "revealed" || phase === "reacted";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center pb-32 px-4" onClick={phase === "floating" ? handleBubbleTap : undefined}>
-      {/* Backdrop */}
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: phase === "fading" ? 0 : 1 }}
+      transition={{ duration: phase === "fading" ? 0.75 : 0.4 }}
+      onAnimationComplete={() => { if (phase === "fading") onClose(); }}
+    >
+      {/* Dimmed backdrop — fades in with the arrival */}
       <motion.div
+        className="absolute inset-0"
         initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="absolute inset-0 bg-black/70 backdrop-blur-md"
-        onClick={phase !== "floating" ? handleSkip : undefined}
+        animate={{
+          opacity: showBubble ? 1 : 1,
+          background: showCard
+            ? "radial-gradient(ellipse at center, rgba(18,8,45,0.82) 0%, rgba(4,2,14,0.97) 100%)"
+            : "radial-gradient(ellipse at center, rgba(14,6,38,0.72) 0%, rgba(4,2,14,0.92) 100%)",
+        }}
+        transition={{ duration: showCard ? 0.6 : 1.4 }}
+        style={{
+          backdropFilter: "blur(14px)",
+          WebkitBackdropFilter: "blur(14px)",
+        }}
+        onClick={showCard ? handleSkip : undefined}
       />
 
       <AnimatePresence mode="wait">
-        {/* PHASE: Floating bubble — tap to pop */}
-        {(phase === "floating" || phase === "popping") && (
+        {/* ── BUBBLE PHASE ── */}
+        {showBubble && (
           <motion.div
             key="bubble"
-            initial={{ y: 200, opacity: 0, scale: 0.4 }}
+            className="relative z-10 flex flex-col items-center select-none"
+            style={{ cursor: phase === "waiting" ? "pointer" : "default" }}
+            initial={{ y: -400, opacity: 0, scale: 0.65 }}
             animate={
-              phase === "floating"
+              phase === "arriving"
                 ? { y: 0, opacity: 1, scale: 1 }
-                : { scale: [1, 1.3, 0], opacity: [1, 1, 0] }
+                : phase === "tapping"
+                ? { scale: [1, 0.86, 0.86], opacity: [1, 1, 0] }
+                : { y: 0, opacity: 1, scale: 1 }
             }
             transition={
-              phase === "floating"
-                ? { type: "spring", stiffness: 60, damping: 14, duration: 1.2 }
-                : { duration: 0.4, ease: "easeOut" }
+              phase === "arriving"
+                ? { duration: 2.2, ease: [0.18, 0.58, 0.32, 1.0] }
+                : phase === "tapping"
+                ? { duration: 0.48, times: [0, 0.32, 1], ease: "easeInOut" }
+                : { duration: 0 }
             }
-            className="relative z-10 cursor-pointer select-none"
+            onAnimationComplete={() => {
+              if (phase === "arriving") setPhase("waiting");
+            }}
             onClick={handleBubbleTap}
           >
-            {/* Outer glow ring */}
-            <div className="absolute inset-0 rounded-full bg-primary/10 blur-2xl scale-150 animate-pulse" />
-            {/* Outer pulse ring */}
-            <div className="absolute inset-0 rounded-full border border-primary/20 animate-[ping_2.5s_cubic-bezier(0,0,0.2,1)_infinite]" />
-
-            {/* Bubble body */}
-            <div
-              className="relative w-52 h-52 sm:w-64 sm:h-64 rounded-full flex flex-col items-center justify-center gap-2"
-              style={{
-                background: "radial-gradient(circle at 35% 35%, rgba(180,140,255,0.18) 0%, rgba(100,60,200,0.08) 50%, rgba(60,30,120,0.04) 100%)",
-                border: "1px solid rgba(200,160,255,0.25)",
-                boxShadow: "0 0 40px rgba(140,100,255,0.2), inset 0 0 30px rgba(200,160,255,0.05)",
-              }}
-            >
-              {/* Bubble shine */}
-              <div className="absolute top-6 left-8 w-8 h-4 rounded-full bg-white/15 blur-sm rotate-[-30deg]" />
-              <div className="absolute top-4 left-10 w-3 h-2 rounded-full bg-white/25 blur-[2px] rotate-[-30deg]" />
-
-              <span className="text-white/50 text-xs tracking-[0.25em] uppercase font-medium">tap to open</span>
-              <div className="w-8 h-px bg-white/15" />
-              <span className="text-white/30 text-[10px] tracking-widest">from the void</span>
-            </div>
-          </motion.div>
-        )}
-
-        {/* PHASE: Thought revealed */}
-        {(phase === "revealed" || phase === "reacted") && (
-          <motion.div
-            key="revealed"
-            initial={{ opacity: 0, scale: 0.7, y: 30 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: -20 }}
-            transition={{ type: "spring", stiffness: 180, damping: 22 }}
-            className="relative z-10 w-full max-w-sm"
-          >
-            {/* Particle burst (decorative dots) */}
-            {[...Array(8)].map((_, i) => (
+            {/* Ripple rings — only in waiting */}
+            {phase === "waiting" && [0, 1, 2].map((i) => (
               <motion.div
                 key={i}
-                className="absolute w-1.5 h-1.5 rounded-full bg-primary/60"
-                style={{ left: "50%", top: "50%" }}
-                initial={{ x: 0, y: 0, opacity: 1, scale: 1 }}
-                animate={{
-                  x: Math.cos((i / 8) * Math.PI * 2) * 90,
-                  y: Math.sin((i / 8) * Math.PI * 2) * 90,
-                  opacity: 0,
-                  scale: 0,
+                className="absolute rounded-full"
+                style={{
+                  width: 220, height: 220,
+                  border: "1px solid rgba(160,120,255,0.18)",
+                  top: 0, left: 0,
                 }}
-                transition={{ duration: 0.6, ease: "easeOut" }}
+                initial={{ scale: 1, opacity: 0.4 }}
+                animate={{ scale: 1.72 + i * 0.2, opacity: 0 }}
+                transition={{
+                  duration: 2.6,
+                  repeat: Infinity,
+                  ease: "easeOut",
+                  delay: i * 0.82,
+                }}
               />
             ))}
 
-            <div
-              className="rounded-3xl p-8 sm:p-10 flex flex-col items-center text-center"
-              style={{
-                background: "rgba(15,10,35,0.92)",
-                border: "1px solid rgba(180,140,255,0.2)",
-                boxShadow: "0 0 60px rgba(140,100,255,0.15), 0 20px 60px rgba(0,0,0,0.6)",
-              }}
+            {/* Bubble shell — breathing when waiting */}
+            <motion.div
+              className="relative rounded-full"
+              style={{ width: 220, height: 220 }}
+              animate={phase === "waiting" ? { scale: [1, 1.032, 1, 0.972, 1] } : { scale: 1 }}
+              transition={phase === "waiting" ? { duration: 3.4, repeat: Infinity, ease: "easeInOut" } : {}}
             >
-              <p className="text-[10px] font-medium tracking-[0.3em] text-white/30 uppercase mb-6">
-                anonymous · from the void
-              </p>
+              {/* Outer ambient glow */}
+              <div className="absolute rounded-full pointer-events-none" style={{
+                inset: "-38%",
+                background: "radial-gradient(circle, rgba(140,100,255,0.16) 0%, rgba(100,60,200,0.06) 45%, transparent 68%)",
+                filter: "blur(22px)",
+              }} />
 
-              {thought.mood && (
-                <div className="mb-4">
-                  <MoodIcon moodId={thought.mood} showLabel />
+              {/* Rim illumination */}
+              <div className="absolute inset-0 rounded-full" style={{
+                background: "radial-gradient(circle at 50% 50%, transparent 44%, rgba(175,145,255,0.22) 80%, rgba(255,255,255,0.16) 100%)",
+              }} />
+
+              {/* Glass body */}
+              <div className="absolute inset-0 rounded-full" style={{
+                background: "radial-gradient(circle at 32% 28%, rgba(255,255,255,0.20) 0%, rgba(155,115,255,0.11) 30%, rgba(95,65,195,0.07) 62%, rgba(45,25,95,0.04) 100%)",
+                border: "1px solid rgba(200,170,255,0.30)",
+                boxShadow: [
+                  "inset 0 1px 0 rgba(255,255,255,0.28)",
+                  "inset 0 -1px 0 rgba(0,0,0,0.18)",
+                  "inset 0 0 32px rgba(155,115,255,0.06)",
+                  "0 0 55px rgba(130,90,255,0.20)",
+                ].join(", "),
+              }} />
+
+              {/* Shimmer sweep — only in waiting */}
+              {phase === "waiting" && (
+                <div className="absolute inset-0 rounded-full overflow-hidden">
+                  <motion.div
+                    style={{
+                      position: "absolute",
+                      top: "-60%",
+                      left: "-40%",
+                      width: "45%",
+                      height: "220%",
+                      background: "linear-gradient(108deg, transparent 0%, rgba(255,255,255,0.10) 50%, transparent 100%)",
+                      transform: "skewX(-18deg)",
+                    }}
+                    initial={{ x: "-100%" }}
+                    animate={{ x: "680%" }}
+                    transition={{
+                      duration: 3.8,
+                      repeat: Infinity,
+                      repeatDelay: 2.0,
+                      ease: [0.4, 0, 0.6, 1],
+                    }}
+                  />
                 </div>
               )}
 
-              <p
+              {/* Primary specular highlight */}
+              <div className="absolute rounded-full" style={{
+                width: "36%", height: "18%",
+                top: "10%", left: "13%",
+                background: "radial-gradient(ellipse, rgba(255,255,255,0.86) 0%, rgba(255,255,255,0.28) 55%, transparent 100%)",
+                filter: "blur(1.5px)",
+                transform: "rotate(-32deg)",
+              }} />
+              {/* Tiny sharp glint */}
+              <div className="absolute rounded-full" style={{
+                width: "10.5%", height: "5.5%",
+                top: "7%", left: "26%",
+                background: "rgba(255,255,255,0.78)",
+                filter: "blur(0.5px)",
+                transform: "rotate(-32deg)",
+              }} />
+              {/* Secondary lower-right reflection */}
+              <div className="absolute rounded-full" style={{
+                width: "26%", height: "12%",
+                bottom: "13%", right: "10%",
+                background: "radial-gradient(ellipse, rgba(255,255,255,0.30) 0%, transparent 100%)",
+                filter: "blur(3px)",
+                transform: "rotate(-32deg)",
+              }} />
+
+              {/* Text inside bubble */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 z-10">
+                {phase === "waiting" && (
+                  <motion.div
+                    className="flex flex-col items-center gap-2"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 1.0, delay: 0.4 }}
+                  >
+                    <span className="text-white/38 text-[10px] tracking-[0.34em] uppercase">tap to open</span>
+                    <div className="w-6 h-px bg-white/14" />
+                    <span className="text-white/20 text-[9px] tracking-widest">from the void</span>
+                  </motion.div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* ── REVEALED PHASE ── */}
+        {showCard && (
+          <motion.div
+            key="revealed"
+            className="relative z-10 w-full max-w-sm"
+            initial={{ opacity: 0, scale: 0.86, y: 14 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.94, y: -18 }}
+            transition={{ duration: 0.72, ease: [0.22, 0.61, 0.36, 1] }}
+          >
+            <div
+              className="rounded-3xl p-8 sm:p-10 flex flex-col items-center text-center"
+              style={{
+                background: "rgba(12,7,30,0.95)",
+                border: "1px solid rgba(175,138,255,0.18)",
+                boxShadow: [
+                  "0 0 90px rgba(110,70,255,0.12)",
+                  "0 28px 90px rgba(0,0,0,0.70)",
+                ].join(", "),
+              }}
+            >
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.22, duration: 0.65 }}
+                className="text-[10px] font-medium tracking-[0.32em] text-white/28 uppercase mb-6"
+              >
+                anonymous · from the void
+              </motion.p>
+
+              {thought.mood && (
+                <motion.div
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.35, duration: 0.55 }}
+                  className="mb-4"
+                >
+                  <MoodIcon moodId={thought.mood} showLabel />
+                </motion.div>
+              )}
+
+              <motion.p
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.45, duration: 0.85, ease: "easeOut" }}
                 className="text-2xl sm:text-3xl leading-relaxed text-white/90 mb-8"
                 style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
               >
                 "{thought.content}"
-              </p>
+              </motion.p>
 
               {/* Reaction buttons */}
-              <div className="flex gap-3 w-full">
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.72, duration: 0.6 }}
+                className="flex gap-3 w-full"
+              >
                 <button
                   onClick={() => handleReact("felt_this")}
                   disabled={!!reacted}
@@ -162,12 +288,7 @@ export function FloatingBubbleReceive({ thought, onClose }: Props) {
                       : "bg-white/5 border-white/8 hover:bg-white/10 hover:border-white/20 text-white/60 cursor-pointer"
                   )}
                 >
-                  <Heart
-                    className={cn(
-                      "w-6 h-6 transition-all duration-500",
-                      reacted === "felt_this" ? "fill-pink-400 text-pink-400 scale-110" : ""
-                    )}
-                  />
+                  <Heart className={cn("w-6 h-6 transition-all duration-500", reacted === "felt_this" ? "fill-pink-400 text-pink-400 scale-110" : "")} />
                   <div>
                     <div className="text-xs font-medium tracking-wide">Felt this</div>
                     <div className="text-[10px] opacity-50 mt-0.5">
@@ -188,12 +309,7 @@ export function FloatingBubbleReceive({ thought, onClose }: Props) {
                       : "bg-white/5 border-white/8 hover:bg-white/10 hover:border-white/20 text-white/60 cursor-pointer"
                   )}
                 >
-                  <Brain
-                    className={cn(
-                      "w-6 h-6 transition-all duration-500",
-                      reacted === "made_think" ? "text-violet-400 scale-110" : ""
-                    )}
-                  />
+                  <Brain className={cn("w-6 h-6 transition-all duration-500", reacted === "made_think" ? "text-violet-400 scale-110" : "")} />
                   <div>
                     <div className="text-xs font-medium tracking-wide">Made me think</div>
                     <div className="text-[10px] opacity-50 mt-0.5">
@@ -201,21 +317,25 @@ export function FloatingBubbleReceive({ thought, onClose }: Props) {
                     </div>
                   </div>
                 </button>
-              </div>
+              </motion.div>
 
               {!reacted && (
-                <button
+                <motion.button
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 1.05, duration: 0.55 }}
                   onClick={handleSkip}
-                  className="mt-5 text-[10px] tracking-widest uppercase text-white/20 hover:text-white/40 transition-colors"
+                  className="mt-5 text-[10px] tracking-widest uppercase text-white/20 hover:text-white/42 transition-colors"
                 >
                   Let it drift away
-                </button>
+                </motion.button>
               )}
 
               {reacted && (
                 <motion.p
-                  initial={{ opacity: 0, y: 4 }}
+                  initial={{ opacity: 0, y: 5 }}
                   animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5 }}
                   className="mt-4 text-[11px] tracking-wider text-white/40"
                 >
                   {reacted === "felt_this" ? "You resonated with this." : "You let it make you think."}
@@ -225,6 +345,6 @@ export function FloatingBubbleReceive({ thought, onClose }: Props) {
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }
