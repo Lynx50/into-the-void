@@ -1,0 +1,12 @@
+packages:
+  "framer-motion": "For ethereal floating animations, smooth transitions, and bubble interactions"
+  "clsx": "For conditional class names"
+  "tailwind-merge": "For merging tailwind classes safely"
+  "date-fns": "For formatting dates in My Orbit"
+
+images: []
+
+notes:
+  - Using localStorage for anonymous user identity
+  - Expecting standard React Query hooks exported from @workspace/api-client-react
+  - Using Lucide icons for moods to keep it abstract and thematic

@@ -1,15 +1,18 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Into the Void API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: thoughts
+    description: Thought operations
+  - name: reactions
+    description: Reaction operations
 paths:
   /healthz:
     get:
@@ -24,6 +27,134 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /thoughts:
+    post:
+      operationId: submitThought
+      tags: [thoughts]
+      summary: Submit a thought into the void
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitThoughtRequest"
+      responses:
+        "201":
+          description: Thought submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thought"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /thoughts/receive:
+    post:
+      operationId: receiveThought
+      tags: [thoughts]
+      summary: Receive a random thought from the void
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReceiveThoughtRequest"
+      responses:
+        "200":
+          description: A random thought
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceivedThought"
+        "429":
+          description: Daily receive limit reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No thoughts available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /thoughts/my:
+    get:
+      operationId: getMyThoughts
+      tags: [thoughts]
+      summary: Get all thoughts submitted by a user
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of user's thoughts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Thought"
+
+  /thoughts/receive-count:
+    get:
+      operationId: getReceiveCount
+      tags: [thoughts]
+      summary: Get how many receives a user has used today
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current receive count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiveCount"
+
+  /thoughts/{id}/react:
+    post:
+      operationId: reactToThought
+      tags: [reactions]
+      summary: React to a thought
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReactRequest"
+      responses:
+        "200":
+          description: Reaction recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thought"
+        "404":
+          description: Thought not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +165,103 @@ components:
       required:
         - status
 
+    Thought:
+      type: object
+      properties:
+        id:
+          type: integer
+        userId:
+          type: string
+        content:
+          type: string
+        mood:
+          type: ["string", "null"]
+        feltThisCount:
+          type: integer
+        madeThinkCount:
+          type: integer
+        createdAt:
+          type: string
+      required:
+        - id
+        - userId
+        - content
+        - mood
+        - feltThisCount
+        - madeThinkCount
+        - createdAt
+
+    ReceivedThought:
+      type: object
+      properties:
+        id:
+          type: integer
+        content:
+          type: string
+        mood:
+          type: ["string", "null"]
+        feltThisCount:
+          type: integer
+        madeThinkCount:
+          type: integer
+      required:
+        - id
+        - content
+        - mood
+        - feltThisCount
+        - madeThinkCount
+
+    SubmitThoughtRequest:
+      type: object
+      properties:
+        userId:
+          type: string
+        content:
+          type: string
+        mood:
+          type: ["string", "null"]
+      required:
+        - userId
+        - content
+
+    ReceiveThoughtRequest:
+      type: object
+      properties:
+        userId:
+          type: string
+      required:
+        - userId
+
+    ReactRequest:
+      type: object
+      properties:
+        userId:
+          type: string
+        reactionType:
+          type: string
+          enum: [felt_this, made_think]
+      required:
+        - userId
+        - reactionType
+
+    ReceiveCount:
+      type: object
+      properties:
+        count:
+          type: integer
+        limit:
+          type: integer
+        remaining:
+          type: integer
+      required:
+        - count
+        - limit
+        - remaining
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error

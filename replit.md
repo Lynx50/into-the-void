@@ -21,7 +21,8 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 ```text
 artifacts-monorepo/
 ├── artifacts/              # Deployable applications
-│   └── api-server/         # Express API server
+│   ├── api-server/         # Express API server
+│   └── into-the-void/      # "Into the Void" React+Vite web app
 ├── lib/                    # Shared libraries
 │   ├── api-spec/           # OpenAPI spec + Orval codegen config
 │   ├── api-client-react/   # Generated React Query hooks
@@ -34,6 +35,26 @@ artifacts-monorepo/
 ├── tsconfig.json           # Root TS project references
 └── package.json            # Root package with hoisted devDeps
 ```
+
+## "Into the Void" App
+
+A dark space-themed anonymous thought-sharing web app.
+
+### Features
+- Submit thoughts (text + optional mood) into the void
+- Receive random thoughts from other users (limited to 3/day)
+- React to received thoughts: "Felt this" (heart) or "Made me think" (brain)
+- "My Orbit" page showing all your submitted thoughts with reaction counts
+- Anonymous users identified by a random userId stored in localStorage
+
+### Pages
+- `/` — Home: submit thoughts, receive from the void
+- `/orbit` — My Orbit: your submitted thoughts with reactions
+
+### DB Tables
+- `thoughts` — user thoughts with mood and reaction counts
+- `receives` — tracks who received which thought (for daily limit)
+- `reactions` — tracks reactions per user per thought (deduplication)
 
 ## TypeScript & Composite Projects
 
@@ -56,41 +77,27 @@ Express 5 API server. Routes live in `src/routes/` and use `@workspace/api-zod` 
 
 - Entry: `src/index.ts` — reads `PORT`, starts Express
 - App setup: `src/app.ts` — mounts CORS, JSON/urlencoded parsing, routes at `/api`
-- Routes: `src/routes/index.ts` mounts sub-routers; `src/routes/health.ts` exposes `GET /health` (full path: `/api/health`)
+- Routes: `src/routes/index.ts` mounts sub-routers; `src/routes/health.ts` exposes `GET /health` (full path: `/api/health`); `src/routes/thoughts.ts` exposes all thought-related endpoints
 - Depends on: `@workspace/db`, `@workspace/api-zod`
-- `pnpm --filter @workspace/api-server run dev` — run the dev server
-- `pnpm --filter @workspace/api-server run build` — production esbuild bundle (`dist/index.cjs`)
-- Build bundles an allowlist of deps (express, cors, pg, drizzle-orm, zod, etc.) and externalizes the rest
 
 ### `lib/db` (`@workspace/db`)
 
-Database layer using Drizzle ORM with PostgreSQL. Exports a Drizzle client instance and schema models.
+Database layer using Drizzle ORM with PostgreSQL.
 
-- `src/index.ts` — creates a `Pool` + Drizzle instance, exports schema
-- `src/schema/index.ts` — barrel re-export of all models
-- `src/schema/<modelname>.ts` — table definitions with `drizzle-zod` insert schemas (no models definitions exist right now)
-- `drizzle.config.ts` — Drizzle Kit config (requires `DATABASE_URL`, automatically provided by Replit)
-- Exports: `.` (pool, db, schema), `./schema` (schema only)
-
-Production migrations are handled by Replit when publishing. In development, we just use `pnpm --filter @workspace/db run push`, and we fallback to `pnpm --filter @workspace/db run push-force`.
+- `src/schema/thoughts.ts` — `thoughts`, `receives`, `reactions` tables
 
 ### `lib/api-spec` (`@workspace/api-spec`)
 
-Owns the OpenAPI 3.1 spec (`openapi.yaml`) and the Orval config (`orval.config.ts`). Running codegen produces output into two sibling packages:
-
-1. `lib/api-client-react/src/generated/` — React Query hooks + fetch client
-2. `lib/api-zod/src/generated/` — Zod schemas
-
-Run codegen: `pnpm --filter @workspace/api-spec run codegen`
+OpenAPI 3.1 spec. Run codegen: `pnpm --filter @workspace/api-spec run codegen`
 
 ### `lib/api-zod` (`@workspace/api-zod`)
 
-Generated Zod schemas from the OpenAPI spec (e.g. `HealthCheckResponse`). Used by `api-server` for response validation.
+Generated Zod schemas from the OpenAPI spec.
 
 ### `lib/api-client-react` (`@workspace/api-client-react`)
 
-Generated React Query hooks and fetch client from the OpenAPI spec (e.g. `useHealthCheck`, `healthCheck`).
+Generated React Query hooks and fetch client from the OpenAPI spec.
 
 ### `scripts` (`@workspace/scripts`)
 
-Utility scripts package. Each script is a `.ts` file in `src/` with a corresponding npm script in `package.json`. Run scripts via `pnpm --filter @workspace/scripts run <script>`. Scripts can import any workspace package (e.g., `@workspace/db`) by adding it as a dependency in `scripts/package.json`.
+Utility scripts package.

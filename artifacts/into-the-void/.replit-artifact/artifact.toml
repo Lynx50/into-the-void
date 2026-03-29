@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Into the Void"
+version = "1.0.0"
+id = "artifacts/into-the-void"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22301
+
+[services.development]
+run = "pnpm --filter @workspace/into-the-void run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/into-the-void", "run", "build" ]
+publicDir = "artifacts/into-the-void/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22301"
+BASE_PATH = "/"
