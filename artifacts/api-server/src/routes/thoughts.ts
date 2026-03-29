@@ -133,7 +133,8 @@ router.post("/thoughts/receive", async (req, res) => {
 
   const todayCount = todayCountResult?.count ?? 0;
 
-  if (todayCount >= DAILY_RECEIVE_LIMIT) {
+  const isDev = process.env.NODE_ENV === "development";
+  if (!isDev && todayCount >= DAILY_RECEIVE_LIMIT) {
     res.status(429).json({ error: "Daily receive limit reached. Come back tomorrow." });
     return;
   }
