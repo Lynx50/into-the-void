@@ -314,11 +314,17 @@ export default function Home() {
               />
             ) : (
               <motion.span
-                animate={{ opacity: [0.55, 0.85, 0.55] }}
-                transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-                className="text-white/70 text-sm font-medium tracking-wide"
+                animate={{ opacity: [0.5, 0.82, 0.5] }}
+                transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
+                style={{
+                  fontFamily: "system-ui, -apple-system, sans-serif",
+                  fontSize: "0.8rem",
+                  fontWeight: 500,
+                  letterSpacing: "0.18em",
+                  color: "rgba(255,255,255,0.72)",
+                }}
               >
-                Receive
+                RECEIVE
               </motion.span>
             )}
           </div>

@@ -1,0 +1,175 @@
+Improve the bubble system and motion across my app "Into the Void" to make it feel alive, immersive, and calming instead of static.
+
+MAIN GOAL:
+Create a dynamic floating bubble environment with depth, variation, and smooth motion.
+
+==================================================
+1. HOME SCREEN BACKGROUND BUBBLES (FIX EMPTY LOOK)
+==================================================
+
+Add a proper background bubble system.
+
+Requirements:
+- Render 10–20 background bubbles
+- Use random sizes:
+  - small (majority)
+  - medium
+  - 1–2 large bubbles
+
+- Use very low opacity (5–12%)
+- Add soft glow and blur effect
+- Keep them behind all UI elements
+
+Movement:
+- Each bubble should move independently
+- Use different speeds:
+  - 70% slow drift
+  - 30% slightly faster
+
+- Use different directions:
+  - upward
+  - diagonal
+  - slight horizontal drift
+
+- Add gentle floating/wobble effect:
+  - subtle vertical oscillation (like floating in water)
+
+Important:
+Bubbles must feel natural and organic, not uniform or patterned.
+
+==================================================
+2. BUBBLE MOTION ENGINE (IMPORTANT)
+==================================================
+
+Create a reusable bubble animation system.
+
+For each bubble:
+- Randomize:
+  - size
+  - position
+  - speed
+  - direction
+  - delay
+
+Animation rules:
+- Use smooth infinite animation loops
+- Avoid sharp or sudden movement
+- Use easing (ease-in-out)
+
+Optional:
+- Slight scale pulsing (very subtle)
+- Occasional fade in/out
+
+==================================================
+3. MY ORBIT BUBBLE SYSTEM (MAKE IT FEEL ALIVE)
+==================================================
+
+Upgrade My Orbit bubbles.
+
+Requirements:
+- Show 6–12 bubbles minimum
+- Spread them across the screen evenly
+- Avoid large empty areas
+
+Bubble design:
+- Different sizes based on engagement (reaction count)
+- Soft glow
+- Slight transparency
+
+Motion:
+- Add slow drifting movement
+- Add gentle wobble (floating effect)
+- Each bubble moves slightly differently
+
+Interaction:
+- On hover/tap:
+  - bubble slightly scales up
+  - glow increases
+
+- On tap:
+  - bubble expands slightly
+  - then "soft pop" or reveal animation
+  - show thought in modal or center card
+
+==================================================
+4. BUBBLE VISUAL IMPROVEMENTS
+==================================================
+
+Improve visibility and depth:
+
+- Add soft outer glow
+- Add subtle highlight on bubble edge
+- Add inner gradient (slight)
+- Use blur/glass effect (frosted look)
+
+Goal:
+Bubbles should feel soft, glowing, and slightly 3D.
+
+==================================================
+5. RECEIVE BUTTON FONT + STYLE FIX
+==================================================
+
+Improve the Receive button typography and feel.
+
+Requirements:
+- Replace current font with clean modern sans-serif:
+  (Inter or system UI font)
+
+- Increase font weight slightly
+- Add slight letter spacing
+
+Button styling:
+- Keep circular shape
+- Add soft glow pulse animation
+- Add subtle ripple effect
+- Make it feel like the primary interactive element
+
+==================================================
+6. GLOBAL MOTION FEEL
+==================================================
+
+Across the entire app:
+
+- Use smooth transitions only
+- Use easing (ease-in-out)
+- Avoid sudden movement or harsh animations
+
+Everything should feel:
+- slow
+- calm
+- fluid
+- organic
+
+==================================================
+7. IMPORTANT DESIGN RULES
+==================================================
+
+Do NOT:
+- make bubbles too bright
+- make movement too fast
+- create patterns or symmetry
+- overcrowd the screen
+
+DO:
+- keep it natural
+- keep it subtle
+- keep it calming
+- keep variation in motion
+
+==================================================
+8. FINAL OUTCOME
+==================================================
+
+The app should feel like:
+
+"a quiet floating space where thoughts drift around you"
+
+NOT like:
+- a static UI
+- a screensaver
+- a game
+
+Focus on:
+- depth
+- motion
+- atmosphere

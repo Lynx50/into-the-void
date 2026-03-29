@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Heart, Brain, MoonStar, X } from "lucide-react";
 import { useMyThoughts } from "@/hooks/use-thoughts";
@@ -7,7 +7,8 @@ import { Thought } from "@workspace/api-client-react";
 import { cn } from "@/lib/utils";
 
 interface BubbleData {
-  thought: Thought;
+  id: string;
+  thought: Thought | null;
   x: number;
   y: number;
   size: number;
@@ -16,86 +17,109 @@ interface BubbleData {
   driftX: number;
   driftY: number;
   glowOpacity: number;
+  hue: number;
+  isPhantom: boolean;
 }
 
-function useBubbles(thoughts: Thought[] | undefined): BubbleData[] {
-  const [bubbles, setBubbles] = useState<BubbleData[]>([]);
+const MIN_BUBBLES = 7;
 
-  useEffect(() => {
-    if (!thoughts || thoughts.length === 0) {
-      setBubbles([]);
-      return;
-    }
+function buildBubbles(thoughts: Thought[] | undefined): BubbleData[] {
+  const vw = typeof window !== "undefined" ? window.innerWidth : 390;
+  const vh = typeof window !== "undefined" ? window.innerHeight : 844;
 
-    const maxReactions = Math.max(
-      ...thoughts.map((t) => t.feltThisCount + t.madeThinkCount),
-      1
+  const maxReactions = thoughts && thoughts.length > 0
+    ? Math.max(...thoughts.map((t) => t.feltThisCount + t.madeThinkCount), 1)
+    : 1;
+
+  const placed: { x: number; y: number; size: number }[] = [];
+
+  function placeAt(size: number): { x: number; y: number } {
+    let x = 0, y = 0, attempts = 0;
+    const margin = (size / vw) * 80;
+    do {
+      x = margin + Math.random() * (92 - margin * 2);
+      y = margin * 0.5 + Math.random() * (85 - margin);
+      attempts++;
+    } while (
+      attempts < 50 &&
+      placed.some((p) => {
+        const dx = ((x - p.x) / 100) * vw;
+        const dy = ((y - p.y) / 100) * vh;
+        return Math.sqrt(dx * dx + dy * dy) < (size + p.size) / 2 + 24;
+      })
     );
+    placed.push({ x, y, size });
+    return { x, y };
+  }
 
-    const placed: { x: number; y: number; size: number }[] = [];
+  const result: BubbleData[] = [];
 
-    const newBubbles = thoughts.map((thought) => {
-      const engagement = thought.feltThisCount + thought.madeThinkCount;
-      const normalized = engagement / maxReactions;
-      // Size: 80px (no reactions) → 180px (max reactions)
-      const size = 80 + normalized * 100;
-
-      let x = 0, y = 0, attempts = 0;
-      const vw = typeof window !== "undefined" ? window.innerWidth : 400;
-      const vh = typeof window !== "undefined" ? window.innerHeight : 700;
-
-      do {
-        x = 10 + Math.random() * 78;
-        y = 8 + Math.random() * 72;
-        attempts++;
-      } while (
-        attempts < 40 &&
-        placed.some((p) => {
-          const dx = ((x - p.x) / 100) * vw;
-          const dy = ((y - p.y) / 100) * vh;
-          return Math.sqrt(dx * dx + dy * dy) < (size + p.size) / 2 + 20;
-        })
-      );
-
-      placed.push({ x, y, size });
-
-      return {
-        thought,
-        x,
-        y,
-        size,
-        duration: 20 + Math.random() * 16,
-        delay: -(Math.random() * 15),
-        driftX: (Math.random() - 0.5) * 20,
-        driftY: (Math.random() - 0.5) * 24,
-        glowOpacity: 0.06 + normalized * 0.14,
-      };
+  (thoughts ?? []).forEach((thought, i) => {
+    const engagement = thought.feltThisCount + thought.madeThinkCount;
+    const normalized = engagement / maxReactions;
+    const size = 82 + normalized * 98;
+    const { x, y } = placeAt(size);
+    const hue = 242 + (i * 13) % 52;
+    result.push({
+      id: `thought-${thought.id}`,
+      thought,
+      x,
+      y,
+      size,
+      duration: 22 + Math.random() * 18,
+      delay: -(Math.random() * 16),
+      driftX: (Math.random() - 0.5) * 22,
+      driftY: (Math.random() - 0.5) * 26,
+      glowOpacity: 0.07 + normalized * 0.16,
+      hue,
+      isPhantom: false,
     });
+  });
 
-    setBubbles(newBubbles);
-  }, [thoughts]);
+  const phantomCount = Math.max(0, MIN_BUBBLES - result.length);
+  for (let p = 0; p < phantomCount; p++) {
+    const size = 56 + Math.random() * 52;
+    const { x, y } = placeAt(size);
+    const hue = 238 + (p * 17) % 48;
+    result.push({
+      id: `phantom-${p}`,
+      thought: null,
+      x,
+      y,
+      size,
+      duration: 26 + Math.random() * 20,
+      delay: -(Math.random() * 20),
+      driftX: (Math.random() - 0.5) * 18,
+      driftY: (Math.random() - 0.5) * 22,
+      glowOpacity: 0.025 + Math.random() * 0.025,
+      hue,
+      isPhantom: true,
+    });
+  }
 
-  return bubbles;
+  return result;
 }
 
 export default function Orbit() {
   const { data: thoughts, isLoading } = useMyThoughts();
-  const bubbles = useBubbles(thoughts);
   const [selected, setSelected] = useState<Thought | null>(null);
-  const [tappedId, setTappedId] = useState<number | null>(null);
+  const [tappedId, setTappedId] = useState<string | null>(null);
 
-  const handleBubbleTap = (thought: Thought) => {
-    setTappedId(thought.id);
-    // Brief tap-scale then open
+  const bubbles = useMemo(() => buildBubbles(thoughts), [thoughts]);
+
+  const handleBubbleTap = (b: BubbleData) => {
+    if (b.isPhantom || !b.thought) return;
+    setTappedId(b.id);
     setTimeout(() => {
-      setSelected(thought);
+      setSelected(b.thought);
       setTappedId(null);
-    }, 220);
+    }, 200);
   };
+
+  const thoughtCount = (thoughts ?? []).length;
 
   return (
     <div className="min-h-screen relative overflow-hidden pb-24">
-      {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: -14 }}
         animate={{ opacity: 1, y: 0 }}
@@ -112,12 +136,16 @@ export default function Orbit() {
         >
           My Orbit
         </h1>
-        <p className="text-[10px] font-medium tracking-[0.28em] text-white/22 mt-3 uppercase">
-          Tap a memory to open it
-        </p>
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="text-[10px] font-medium tracking-[0.3em] text-white/20 mt-3 uppercase"
+        >
+          {thoughtCount > 0 ? "Tap a memory to open it" : "Release thoughts to fill your orbit"}
+        </motion.p>
       </motion.div>
 
-      {/* Content */}
       {isLoading ? (
         <div className="flex justify-center items-center py-40">
           <motion.div
@@ -126,54 +154,59 @@ export default function Orbit() {
             className="w-7 h-7 rounded-full border border-primary/30 border-t-primary/80"
           />
         </div>
-      ) : thoughts && thoughts.length > 0 ? (
+      ) : (
         <div className="absolute inset-0 top-28">
           {bubbles.map((b, i) => {
-            const engagement = b.thought.feltThisCount + b.thought.madeThinkCount;
-            const isTapped = tappedId === b.thought.id;
-
-            // Iridescence shifts slightly per bubble
-            const hue = 250 + (i % 5) * 12;
+            const isTapped = tappedId === b.id;
+            const isInteractive = !b.isPhantom && b.thought !== null;
 
             return (
               <motion.div
-                key={b.thought.id}
-                className="absolute cursor-pointer select-none"
+                key={b.id}
+                className={cn("absolute select-none", isInteractive ? "cursor-pointer" : "cursor-default")}
                 style={{
                   left: `${b.x}%`,
                   top: `${b.y}%`,
                   width: b.size,
                   height: b.size,
                   transform: "translate(-50%, -50%)",
-                  zIndex: 10,
+                  zIndex: isInteractive ? 10 : 4,
                 }}
-                initial={{ opacity: 0, scale: 0.2 }}
+                initial={{ opacity: 0, scale: 0 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{
-                  delay: i * 0.1,
+                  delay: i * 0.07,
                   type: "spring",
-                  stiffness: 100,
-                  damping: 16,
+                  stiffness: 90,
+                  damping: 18,
                 }}
-                onClick={() => handleBubbleTap(b.thought)}
+                onClick={() => handleBubbleTap(b)}
               >
-                {/* Ambient glow */}
-                <div
+                {/* Outer ambient glow */}
+                <motion.div
                   className="absolute inset-0 rounded-full"
+                  animate={{
+                    opacity: [b.glowOpacity * 0.7, b.glowOpacity * 1.5, b.glowOpacity * 0.8, b.glowOpacity * 0.7],
+                  }}
+                  transition={{ duration: b.duration * 0.6, repeat: Infinity, ease: "easeInOut", delay: b.delay }}
                   style={{
-                    background: `radial-gradient(circle, hsla(${hue},60%,70%,${b.glowOpacity}) 0%, transparent 70%)`,
-                    filter: "blur(12px)",
-                    transform: "scale(1.5)",
+                    background: `radial-gradient(circle, hsla(${b.hue},60%,72%,1) 0%, transparent 68%)`,
+                    filter: "blur(14px)",
+                    transform: "scale(1.55)",
                   }}
                 />
 
-                {/* Bubble */}
+                {/* Bubble body — drifting */}
                 <motion.div
-                  className="w-full h-full rounded-full relative overflow-hidden"
+                  className="w-full h-full rounded-full relative"
                   animate={{
-                    x: [0, b.driftX * 0.4, b.driftX, b.driftX * 0.6, 0],
-                    y: [0, b.driftY * 0.6, b.driftY * 0.2, b.driftY, 0],
-                    scale: isTapped ? [1, 1.15, 0.92] : [1, 1.02, 0.99, 1.01, 1],
+                    x: isTapped
+                      ? [0, 10, -6, 0]
+                      : [0, b.driftX * 0.35, b.driftX * 0.8, b.driftX * 0.5, 0, -b.driftX * 0.2, 0],
+                    y: isTapped
+                      ? [0, -8, 4, 0]
+                      : [0, b.driftY * 0.5, b.driftY * 0.2, b.driftY * 0.9, b.driftY * 0.4, 0],
+                    scale: isTapped ? [1, 1.18, 0.9, 1] : [1, 1.025, 0.985, 1.015, 1],
                   }}
                   transition={
                     isTapped
@@ -185,91 +218,61 @@ export default function Orbit() {
                           delay: b.delay,
                         }
                   }
-                  whileHover={{ scale: 1.08 }}
+                  whileHover={isInteractive ? { scale: 1.1, transition: { duration: 0.35 } } : undefined}
                   style={{
-                    background: `radial-gradient(circle at 32% 28%, hsla(${hue},60%,85%,0.18) 0%, hsla(${hue + 20},50%,60%,0.08) 50%, transparent 100%)`,
-                    border: `1px solid hsla(${hue},50%,80%,0.22)`,
-                    boxShadow: `0 0 ${16 + engagement * 5}px hsla(${hue},50%,70%,${b.glowOpacity + 0.04})`,
+                    background: b.isPhantom
+                      ? `radial-gradient(circle at 35% 30%, hsla(${b.hue},30%,70%,0.06) 0%, transparent 100%)`
+                      : `radial-gradient(circle at 33% 29%, hsla(${b.hue},62%,86%,0.2) 0%, hsla(${b.hue + 18},50%,62%,0.09) 52%, transparent 100%)`,
+                    border: b.isPhantom
+                      ? `1px solid hsla(${b.hue},35%,72%,0.1)`
+                      : `1px solid hsla(${b.hue},52%,82%,0.24)`,
+                    boxShadow: b.isPhantom
+                      ? "none"
+                      : `0 0 ${14 + (b.thought?.feltThisCount ?? 0) * 4 + (b.thought?.madeThinkCount ?? 0) * 4}px hsla(${b.hue},50%,70%,${b.glowOpacity + 0.03})`,
                   }}
                 >
-                  {/* Shine highlight */}
-                  <div
-                    className="absolute rounded-full bg-white/18"
-                    style={{
-                      width: "30%",
-                      height: "13%",
-                      top: "14%",
-                      left: "20%",
-                      filter: "blur(2px)",
-                      transform: "rotate(-30deg)",
-                    }}
-                  />
-                  {/* Secondary tiny shine */}
-                  <div
-                    className="absolute rounded-full bg-white/10"
-                    style={{
-                      width: "12%",
-                      height: "6%",
-                      top: "10%",
-                      left: "28%",
-                      filter: "blur(1px)",
-                      transform: "rotate(-30deg)",
-                    }}
-                  />
+                  {/* Primary shine */}
+                  {!b.isPhantom && (
+                    <>
+                      <div
+                        className="absolute rounded-full bg-white/20"
+                        style={{ width: "32%", height: "14%", top: "13%", left: "18%", filter: "blur(2.5px)", transform: "rotate(-30deg)" }}
+                      />
+                      <div
+                        className="absolute rounded-full bg-white/10"
+                        style={{ width: "13%", height: "6%", top: "9%", left: "27%", filter: "blur(1px)", transform: "rotate(-30deg)" }}
+                      />
+                    </>
+                  )}
                 </motion.div>
 
-                {/* Reaction dot — only if has reactions */}
-                {engagement > 0 && (
+                {/* Reaction dot — real thoughts only */}
+                {isInteractive && b.thought && (b.thought.feltThisCount + b.thought.madeThinkCount) > 0 && (
                   <div
-                    className="absolute bottom-[12%] left-1/2 -translate-x-1/2 flex items-center gap-1"
-                    style={{ opacity: 0.4 }}
+                    className="absolute bottom-[10%] left-1/2 -translate-x-1/2 flex items-center gap-1"
+                    style={{ opacity: 0.38 }}
                   >
-                    <Heart className="text-pink-300" style={{ width: 8, height: 8 }} />
-                    <span className="text-white/60" style={{ fontSize: 8 }}>{engagement}</span>
+                    <Heart className="text-pink-300/80" style={{ width: 7, height: 7 }} />
+                    <span className="text-white/50" style={{ fontSize: 7, fontFamily: "system-ui" }}>
+                      {b.thought.feltThisCount + b.thought.madeThinkCount}
+                    </span>
                   </div>
                 )}
               </motion.div>
             );
           })}
 
-          {/* Subtle hint */}
-          <div className="absolute bottom-4 left-0 right-0 flex justify-center pointer-events-none">
-            <p className="text-[9px] tracking-[0.3em] text-white/12 uppercase">
-              {thoughts.length} {thoughts.length === 1 ? "memory" : "memories"} floating
-            </p>
-          </div>
+          {thoughtCount > 0 && (
+            <div className="absolute bottom-4 left-0 right-0 flex justify-center pointer-events-none">
+              <p className="text-[9px] tracking-[0.32em] text-white/12 uppercase">
+                {thoughtCount} {thoughtCount === 1 ? "memory" : "memories"} in your orbit
+              </p>
+            </div>
+          )}
         </div>
-      ) : (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.4 }}
-          className="flex flex-col items-center justify-center py-36 text-center px-8"
-        >
-          <motion.div
-            animate={{ scale: [1, 1.06, 1], opacity: [0.4, 0.7, 0.4] }}
-            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-            className="w-20 h-20 rounded-full mb-8 flex items-center justify-center"
-            style={{
-              background: "radial-gradient(circle at 35% 35%, rgba(180,140,255,0.08) 0%, transparent 100%)",
-              border: "1px solid rgba(200,160,255,0.1)",
-            }}
-          >
-            <MoonStar className="w-7 h-7 text-white/18" strokeWidth={1} />
-          </motion.div>
-          <h3
-            className="text-2xl text-white/45 mb-2"
-            style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
-          >
-            Your orbit is empty
-          </h3>
-          <p className="text-white/22 text-sm tracking-wide">
-            Release a thought to see it float here.
-          </p>
-        </motion.div>
       )}
 
-      {/* Thought reveal panel */}
+      {/* Thought reveal */}
       <AnimatePresence>
         {selected && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
@@ -277,34 +280,39 @@ export default function Orbit() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.4 }}
-              className="absolute inset-0 bg-black/75 backdrop-blur-lg"
+              transition={{ duration: 0.45 }}
+              className="absolute inset-0 bg-black/78 backdrop-blur-xl"
               onClick={() => setSelected(null)}
             />
 
             <motion.div
-              initial={{ opacity: 0, scale: 0.75, y: 24 }}
+              initial={{ opacity: 0, scale: 0.7, y: 28 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.88, y: 12 }}
-              transition={{ type: "spring", stiffness: 160, damping: 22 }}
+              exit={{ opacity: 0, scale: 0.86, y: 14 }}
+              transition={{ type: "spring", stiffness: 140, damping: 22 }}
               className="relative w-full max-w-sm z-10 rounded-3xl p-9 flex flex-col items-center text-center"
               style={{
-                background: "rgba(10,6,28,0.96)",
-                border: "1px solid rgba(180,140,255,0.16)",
-                boxShadow:
-                  "0 0 80px rgba(140,100,255,0.1), 0 24px 80px rgba(0,0,0,0.75)",
+                background: "rgba(8,4,24,0.97)",
+                border: "1px solid rgba(180,140,255,0.15)",
+                boxShadow: "0 0 90px rgba(140,100,255,0.09), 0 28px 90px rgba(0,0,0,0.8)",
               }}
             >
               <button
                 onClick={() => setSelected(null)}
-                className="absolute top-5 right-5 p-2 rounded-full text-white/25 hover:text-white/60 hover:bg-white/6 transition-all duration-300"
+                className="absolute top-5 right-5 p-2 rounded-full text-white/22 hover:text-white/55 hover:bg-white/5 transition-all duration-300"
               >
                 <X className="w-4 h-4" />
               </button>
 
-              <p className="text-[9px] font-medium tracking-[0.35em] text-white/22 uppercase mb-5">
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.05 }}
+                className="text-[9px] font-medium tracking-[0.38em] text-white/20 uppercase mb-5"
+                style={{ fontFamily: "system-ui" }}
+              >
                 your memory
-              </p>
+              </motion.p>
 
               {selected.mood && (
                 <motion.div
@@ -318,9 +326,9 @@ export default function Orbit() {
               )}
 
               <motion.p
-                initial={{ opacity: 0, y: 8 }}
+                initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.15 }}
+                transition={{ delay: 0.14, duration: 0.6 }}
                 className="text-2xl sm:text-3xl leading-relaxed text-white/85 mb-8"
                 style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
               >
@@ -330,35 +338,25 @@ export default function Orbit() {
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ delay: 0.25 }}
-                className="flex gap-8 border-t border-white/[0.06] pt-6 w-full justify-center"
+                transition={{ delay: 0.26 }}
+                className="flex gap-8 border-t border-white/[0.055] pt-6 w-full justify-center"
               >
                 <div className="flex flex-col items-center gap-1.5">
-                  <Heart
-                    className={cn(
-                      "w-5 h-5 transition-colors",
-                      selected.feltThisCount > 0 ? "text-pink-400" : "text-white/18"
-                    )}
-                  />
-                  <span className="text-sm font-medium text-white/55">
+                  <Heart className={cn("w-5 h-5", selected.feltThisCount > 0 ? "text-pink-400" : "text-white/16")} />
+                  <span className="text-sm font-semibold text-white/55" style={{ fontFamily: "system-ui" }}>
                     {selected.feltThisCount}
                   </span>
-                  <span className="text-[9px] text-white/22 tracking-wider uppercase">
+                  <span className="text-[9px] text-white/20 tracking-wider uppercase" style={{ fontFamily: "system-ui" }}>
                     Felt this
                   </span>
                 </div>
-                <div className="w-px bg-white/[0.06]" />
+                <div className="w-px bg-white/[0.055]" />
                 <div className="flex flex-col items-center gap-1.5">
-                  <Brain
-                    className={cn(
-                      "w-5 h-5 transition-colors",
-                      selected.madeThinkCount > 0 ? "text-violet-400" : "text-white/18"
-                    )}
-                  />
-                  <span className="text-sm font-medium text-white/55">
+                  <Brain className={cn("w-5 h-5", selected.madeThinkCount > 0 ? "text-violet-400" : "text-white/16")} />
+                  <span className="text-sm font-semibold text-white/55" style={{ fontFamily: "system-ui" }}>
                     {selected.madeThinkCount}
                   </span>
-                  <span className="text-[9px] text-white/22 tracking-wider uppercase">
+                  <span className="text-[9px] text-white/20 tracking-wider uppercase" style={{ fontFamily: "system-ui" }}>
                     Made think
                   </span>
                 </div>
