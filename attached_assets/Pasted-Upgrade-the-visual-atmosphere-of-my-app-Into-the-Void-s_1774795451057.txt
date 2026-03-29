@@ -1,0 +1,174 @@
+Upgrade the visual atmosphere of my app "Into the Void" so the bubbles feel like soft floating glass spheres in space, and the background has a subtle starfield for depth.
+
+MAIN GOAL:
+Make the app feel premium, atmospheric, and immersive.
+Right now the bubbles feel too soft/blurry and not enough like glass.
+The background also feels too empty.
+Fix both.
+
+==================================================
+1. ADD A SUBTLE STARFIELD BACKGROUND
+==================================================
+
+Create a layered starfield behind everything.
+
+Requirements:
+- Add many tiny stars across the background
+- Most stars should be very small dots
+- Vary brightness and opacity
+- Some stars should be sharper
+- Some stars should be slightly blurred
+- Keep the starfield subtle, elegant, and sparse enough to feel premium
+- Do NOT make it look busy or like a cheap wallpaper
+
+Depth:
+- Use multiple star layers:
+  - far stars = tiny and faint
+  - mid stars = slightly brighter
+  - very occasional brighter star
+
+Movement:
+- Stars should be mostly static
+- Optional: extremely slow drift or parallax movement
+- Motion should be almost unnoticeable
+
+Color:
+- Mostly soft white / cool white
+- Optional tiny hints of blue or violet glow on a few stars
+
+==================================================
+2. TURN BUBBLES INTO GLASS SPHERES
+==================================================
+
+Redesign all bubbles so they feel like translucent glass spheres instead of blurry circles.
+
+For each bubble, add these visual properties:
+
+A. EDGE HIGHLIGHT
+- Add a brighter rim or edge highlight
+- Make the rim subtle, not harsh
+- It should help define the bubble shape clearly
+
+B. SPECULAR HIGHLIGHT
+- Add a small bright reflection spot near the upper-left area
+- It should be soft and slightly blurred
+- This should make the bubble feel glossy and spherical
+
+C. INNER GRADIENT
+- Use a soft inner gradient
+- Slightly darker center
+- Slightly lighter edges
+- Keep the effect subtle
+
+D. GLASS / FROSTED MATERIAL FEEL
+- Add a very subtle glassy transparency
+- Add slight background blur through the bubble if possible
+- Use a soft blue-violet tint
+- Do NOT make the bubbles opaque
+
+E. OUTER GLOW
+- Add a faint outer glow
+- Keep it subtle and premium
+- Glow should not overpower the sphere shape
+
+F. OPTIONAL LIGHT REFRACTION FEEL
+- If possible, add extremely subtle distortion or layered transparency so the bubble feels more dimensional
+- Keep this very soft
+
+==================================================
+3. IMPROVE BUBBLE DEPTH AND LAYERING
+==================================================
+
+Create visual depth with multiple bubble layers.
+
+Use 3 depth levels:
+
+Layer 1: Far background bubbles
+- very faint
+- smaller
+- slower movement
+
+Layer 2: Mid-level bubbles
+- slightly clearer
+- varied sizes
+- moderate movement
+
+Layer 3: Foreground bubbles
+- 1 to 3 more visible bubbles
+- soft glow
+- drift gently across screen
+- should feel closest to the user
+
+Important:
+Bubbles must not all feel like they sit on the same flat layer.
+
+==================================================
+4. IMPROVE BUBBLE MOTION
+==================================================
+
+Make bubble movement feel natural and organic.
+
+Requirements:
+- Different bubbles move at different speeds
+- Add slow drift in different directions
+- Add slight wobble / float oscillation
+- Use smooth easing only
+- Avoid uniform motion
+- Avoid sudden movement
+
+Movement should feel like:
+- floating in still water
+- drifting through silent space
+
+==================================================
+5. APPLY THIS TO HOME SCREEN AND MY ORBIT
+==================================================
+
+Home screen:
+- Add more visible atmospheric bubbles behind the UI
+- Keep them subtle but clearly sphere-like
+- The screen should feel alive even when idle
+
+My Orbit:
+- Bubbles should feel like floating memories
+- Keep text hidden by default
+- Show text only after tap/reveal
+- Make orbit bubbles also use the new glass sphere style
+- Use different sizes based on engagement
+
+==================================================
+6. DO NOT OVERDO IT
+==================================================
+
+Avoid:
+- heavy neon glow
+- cartoon bubbles
+- too much blur
+- too many bright stars
+- shiny plastic look
+- busy wallpaper look
+
+Aim for:
+- premium
+- calm
+- elegant
+- soft glass
+- emotional atmosphere
+
+==================================================
+7. FINAL OUTCOME
+==================================================
+
+The app should feel like:
+"a quiet space filled with drifting glass thoughts suspended in a subtle night sky"
+
+NOT like:
+- a screensaver
+- a game
+- generic blurry circles on black
+
+Focus on:
+- believable glass spheres
+- layered depth
+- subtle starfield
+- calm premium atmosphere

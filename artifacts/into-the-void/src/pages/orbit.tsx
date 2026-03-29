@@ -182,65 +182,71 @@ export default function Orbit() {
                 }}
                 onClick={() => handleBubbleTap(b)}
               >
-                {/* Outer ambient glow */}
+                {/* Ambient outer glow — pulses slowly */}
                 <motion.div
-                  className="absolute inset-0 rounded-full"
+                  className="absolute rounded-full"
                   animate={{
-                    opacity: [b.glowOpacity * 0.7, b.glowOpacity * 1.5, b.glowOpacity * 0.8, b.glowOpacity * 0.7],
+                    opacity: [b.glowOpacity * 0.6, b.glowOpacity * 1.6, b.glowOpacity * 0.75, b.glowOpacity * 0.6],
                   }}
-                  transition={{ duration: b.duration * 0.6, repeat: Infinity, ease: "easeInOut", delay: b.delay }}
+                  transition={{ duration: b.duration * 0.55, repeat: Infinity, ease: "easeInOut", delay: b.delay }}
                   style={{
-                    background: `radial-gradient(circle, hsla(${b.hue},60%,72%,1) 0%, transparent 68%)`,
-                    filter: "blur(14px)",
-                    transform: "scale(1.55)",
+                    inset: "-35%",
+                    background: `radial-gradient(circle, hsla(${b.hue},62%,70%,1) 0%, transparent 65%)`,
+                    filter: `blur(${b.size * 0.18}px)`,
                   }}
                 />
 
-                {/* Bubble body — drifting */}
+                {/* Glass sphere body — drifting */}
                 <motion.div
-                  className="w-full h-full rounded-full relative"
+                  className="w-full h-full rounded-full relative overflow-hidden"
                   animate={{
                     x: isTapped
-                      ? [0, 10, -6, 0]
+                      ? [0, 12, -7, 0]
                       : [0, b.driftX * 0.35, b.driftX * 0.8, b.driftX * 0.5, 0, -b.driftX * 0.2, 0],
                     y: isTapped
-                      ? [0, -8, 4, 0]
+                      ? [0, -10, 5, 0]
                       : [0, b.driftY * 0.5, b.driftY * 0.2, b.driftY * 0.9, b.driftY * 0.4, 0],
-                    scale: isTapped ? [1, 1.18, 0.9, 1] : [1, 1.025, 0.985, 1.015, 1],
+                    scale: isTapped ? [1, 1.2, 0.88, 1] : [1, 1.025, 0.982, 1.015, 1],
                   }}
                   transition={
                     isTapped
-                      ? { duration: 0.22, ease: "easeOut" }
-                      : {
-                          duration: b.duration,
-                          repeat: Infinity,
-                          ease: "easeInOut",
-                          delay: b.delay,
-                        }
+                      ? { duration: 0.24, ease: "easeOut" }
+                      : { duration: b.duration, repeat: Infinity, ease: "easeInOut", delay: b.delay }
                   }
-                  whileHover={isInteractive ? { scale: 1.1, transition: { duration: 0.35 } } : undefined}
-                  style={{
-                    background: b.isPhantom
-                      ? `radial-gradient(circle at 35% 30%, hsla(${b.hue},30%,70%,0.06) 0%, transparent 100%)`
-                      : `radial-gradient(circle at 33% 29%, hsla(${b.hue},62%,86%,0.2) 0%, hsla(${b.hue + 18},50%,62%,0.09) 52%, transparent 100%)`,
-                    border: b.isPhantom
-                      ? `1px solid hsla(${b.hue},35%,72%,0.1)`
-                      : `1px solid hsla(${b.hue},52%,82%,0.24)`,
-                    boxShadow: b.isPhantom
-                      ? "none"
-                      : `0 0 ${14 + (b.thought?.feltThisCount ?? 0) * 4 + (b.thought?.madeThinkCount ?? 0) * 4}px hsla(${b.hue},50%,70%,${b.glowOpacity + 0.03})`,
+                  whileHover={isInteractive ? { scale: 1.11, transition: { duration: 0.4 } } : undefined}
+                  style={b.isPhantom ? {
+                    background: `radial-gradient(circle at 30% 26%, rgba(255,255,255,0.04) 0%, hsla(${b.hue},28%,55%,0.025) 50%, transparent 100%)`,
+                    border: `1px solid rgba(255,255,255,0.07)`,
+                  } : {
+                    background: `radial-gradient(circle at 28% 24%, rgba(255,255,255,0.22) 0%, hsla(${b.hue},62%,80%,0.14) 24%, hsla(${b.hue},50%,52%,0.08) 58%, hsla(${b.hue + 18},42%,28%,0.05) 100%)`,
+                    border: `1px solid rgba(255,255,255,${b.glowOpacity * 3.5 + 0.1})`,
+                    boxShadow: `inset 0 1px 0 rgba(255,255,255,${b.glowOpacity * 2.5}), inset 0 -1px 0 rgba(0,0,0,0.08), 0 0 ${18 + (b.thought?.feltThisCount ?? 0) * 5 + (b.thought?.madeThinkCount ?? 0) * 5}px hsla(${b.hue},50%,68%,${b.glowOpacity + 0.04})`,
+                    backdropFilter: "blur(6px)",
+                    WebkitBackdropFilter: "blur(6px)",
                   }}
                 >
-                  {/* Primary shine */}
+                  {/* Specular highlight */}
                   {!b.isPhantom && (
                     <>
                       <div
-                        className="absolute rounded-full bg-white/20"
-                        style={{ width: "32%", height: "14%", top: "13%", left: "18%", filter: "blur(2.5px)", transform: "rotate(-30deg)" }}
+                        className="absolute rounded-full"
+                        style={{
+                          width: "32%", height: "16%",
+                          top: "11%", left: "15%",
+                          background: `radial-gradient(ellipse, rgba(255,255,255,0.78) 0%, transparent 100%)`,
+                          filter: "blur(2px)",
+                          transform: "rotate(-32deg)",
+                        }}
                       />
                       <div
-                        className="absolute rounded-full bg-white/10"
-                        style={{ width: "13%", height: "6%", top: "9%", left: "27%", filter: "blur(1px)", transform: "rotate(-30deg)" }}
+                        className="absolute rounded-full"
+                        style={{
+                          width: "12%", height: "6%",
+                          top: "7%", left: "26%",
+                          background: "rgba(255,255,255,0.55)",
+                          filter: "blur(0.8px)",
+                          transform: "rotate(-32deg)",
+                        }}
                       />
                     </>
                   )}
