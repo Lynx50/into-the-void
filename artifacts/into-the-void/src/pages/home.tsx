@@ -27,7 +27,8 @@ export default function Home() {
   const { data: receiveCountData } = useReceiveCount();
   const { data: myThoughts } = useMyThoughts();
 
-  const isOverLimit = receiveCountData?.remaining === 0;
+  const isDev = import.meta.env.DEV;
+  const isOverLimit = !isDev && receiveCountData?.remaining === 0;
   const hasSubmitted = myThoughts && myThoughts.length > 0;
   const lastThought = myThoughts?.[0];
   const lastThoughtReactions = lastThought
@@ -372,7 +373,7 @@ export default function Home() {
                 animate={{ opacity: 1 }}
                 className="text-[10px] tracking-[0.22em] text-white/18 uppercase"
               >
-                {receiveCountData.remaining} / {receiveCountData.limit} receives remaining today
+                {isDev ? "Dev mode: unlimited receives" : `${receiveCountData.remaining} / ${receiveCountData.limit} receives remaining today`}
               </motion.p>
             ) : null}
           </AnimatePresence>
