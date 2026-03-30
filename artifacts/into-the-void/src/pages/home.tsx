@@ -70,7 +70,7 @@ export default function Home() {
       {
         onSuccess: (data) => setReceivedThought(data),
         onError: (err: any) => {
-          if (err.status === 404) setReceiveError("The void is quiet. Be the first to release one.");
+          if (err.status === 404) setReceiveError("No new thoughts right now. Release one and come back later.");
           else if (err.status === 429) setReceiveError("You've reached your limit for today.");
           else if (err.status === 403) setReceiveError("Release a thought first to unlock receiving.");
           else setReceiveError("Failed to reach the void.");

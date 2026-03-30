@@ -10,7 +10,7 @@ import {
   getGetReceiveCountQueryKey,
 } from "@workspace/api-client-react";
 import { useUser } from "./use-user";
-import { getRandomSeedThought } from "@/data/seedThoughts";
+import { seedThoughts } from "@/data/seedThoughts";
 
 export { useUser };
 
@@ -55,11 +55,25 @@ export function useReceiveThought() {
         try {
           return await receiveThought(data);
         } catch (err) {
-          // 404 means the server has no eligible thoughts — serve a local fallback.
-          // All other errors (403 no submission yet, 429 daily limit, etc.) re-throw
-          // so existing error handling in the UI continues to work normally.
+          // 404 means the server has no unseen DB thoughts for this user.
+          // Try the local seed fallback, honouring the same "never repeat" rule
+          // via a localStorage set of already-shown seed IDs.
+          // All other errors (403, 429, network) re-throw so the UI handles them.
           if ((err as { status?: number })?.status === 404) {
-            return getRandomSeedThought();
+            const SEEN_KEY = "void_seen_seed_ids";
+            const raw = localStorage.getItem(SEEN_KEY);
+            const seenIds: number[] = raw ? (JSON.parse(raw) as number[]) : [];
+
+            const unseen = seedThoughts.filter((t) => !seenIds.includes(t.id));
+            if (unseen.length === 0) {
+              // All seed thoughts exhausted — surface the 404 so the UI shows
+              // the graceful "no new thoughts" message.
+              throw err;
+            }
+
+            const pick = unseen[Math.floor(Math.random() * unseen.length)];
+            localStorage.setItem(SEEN_KEY, JSON.stringify([...seenIds, pick.id]));
+            return pick;
           }
           throw err;
         }

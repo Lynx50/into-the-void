@@ -149,7 +149,11 @@ router.post("/thoughts/receive", async (req, res) => {
       AND reactions.reaction_type LIKE 'report%'
   ) < ${REPORT_HIDE_THRESHOLD}`;
 
-  const baseWhere = and(ne(thoughtsTable.userId, userId), notReported);
+  const notAlreadySeen = sql`${thoughtsTable.id} NOT IN (
+    SELECT thought_id FROM receives WHERE user_id = ${userId}
+  )`;
+
+  const baseWhere = and(ne(thoughtsTable.userId, userId), notReported, notAlreadySeen);
   const weightedOrder = sql`RANDOM() * (${thoughtsTable.feltThisCount} + ${thoughtsTable.madeThinkCount} + 1) DESC`;
 
   let thoughts = await db
@@ -172,7 +176,7 @@ router.post("/thoughts/receive", async (req, res) => {
   const thought = thoughts[0];
 
   if (!thought) {
-    res.status(404).json({ error: "No thoughts available yet. Be the first to release one!" });
+    res.status(404).json({ error: "No new thoughts right now. Release one and come back later." });
     return;
   }
 
