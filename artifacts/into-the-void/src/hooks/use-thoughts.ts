@@ -45,6 +45,23 @@ export function useSubmitThought() {
   });
 }
 
+const SEEN_THOUGHT_IDS_KEY = "void_seen_thought_ids";
+
+function getSeenIds(): number[] {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_THOUGHT_IDS_KEY) ?? "[]") as number[];
+  } catch {
+    return [];
+  }
+}
+
+function recordSeenId(id: number): void {
+  const seen = getSeenIds();
+  if (!seen.includes(id)) {
+    localStorage.setItem(SEEN_THOUGHT_IDS_KEY, JSON.stringify([...seen, id]));
+  }
+}
+
 export function useReceiveThought() {
   const queryClient = useQueryClient();
   const { userId } = useUser();
@@ -56,29 +73,23 @@ export function useReceiveThought() {
           return await receiveThought(data);
         } catch (err) {
           // 404 means the server has no unseen DB thoughts for this user.
-          // Try the local seed fallback, honouring the same "never repeat" rule
-          // via a localStorage set of already-shown seed IDs.
+          // Try unseen local seed thoughts as a fallback.
           // All other errors (403, 429, network) re-throw so the UI handles them.
           if ((err as { status?: number })?.status === 404) {
-            const SEEN_KEY = "void_seen_seed_ids";
-            const raw = localStorage.getItem(SEEN_KEY);
-            const seenIds: number[] = raw ? (JSON.parse(raw) as number[]) : [];
-
+            const seenIds = getSeenIds();
             const unseen = seedThoughts.filter((t) => !seenIds.includes(t.id));
             if (unseen.length === 0) {
-              // All seed thoughts exhausted — surface the 404 so the UI shows
-              // the graceful "no new thoughts" message.
+              // Every seed thought has also been seen — show the graceful message.
               throw err;
             }
-
-            const pick = unseen[Math.floor(Math.random() * unseen.length)];
-            localStorage.setItem(SEEN_KEY, JSON.stringify([...seenIds, pick.id]));
-            return pick;
+            return unseen[Math.floor(Math.random() * unseen.length)];
           }
           throw err;
         }
       },
-      onSuccess: () => {
+      onSuccess: (thought) => {
+        // Record the delivered thought ID immediately so it is never shown again.
+        recordSeenId(thought.id);
         if (userId) {
           queryClient.invalidateQueries({ queryKey: getGetReceiveCountQueryKey({ userId }) });
         }
