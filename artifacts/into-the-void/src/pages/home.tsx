@@ -12,6 +12,7 @@ import {
 } from "@/hooks/use-thoughts";
 import { FloatingBubbleReceive } from "@/components/floating-bubble-receive";
 import { ReceivedThought } from "@workspace/api-client-react";
+import { usePwaInstall } from "@/hooks/use-pwa-install";
 
 export default function Home() {
   const { userId, isReady } = useUser();
@@ -27,6 +28,7 @@ export default function Home() {
   const { data: receiveCountData } = useReceiveCount();
   const { data: myThoughts } = useMyThoughts();
 
+  const { canInstall, triggerInstall } = usePwaInstall();
   const isDev = import.meta.env.DEV;
   const isOverLimit = !isDev && receiveCountData?.remaining === 0;
   const hasSubmitted = myThoughts && myThoughts.length > 0;
@@ -379,6 +381,26 @@ export default function Home() {
           </AnimatePresence>
         </div>
       </motion.div>
+
+      {/* PWA install button — shown only when Chrome fires beforeinstallprompt */}
+      <AnimatePresence>
+        {canInstall && (
+          <motion.button
+            key="pwa-install"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 12 }}
+            transition={{ duration: 0.4 }}
+            onClick={triggerInstall}
+            className="fixed bottom-6 right-5 z-50 flex items-center gap-2 px-4 py-2.5 rounded-full text-xs tracking-widest uppercase text-white/70 border border-white/10 bg-white/5 backdrop-blur-md hover:bg-white/10 hover:text-white/90 transition-colors"
+          >
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" xmlns="http://www.w3.org/2000/svg" className="opacity-70">
+              <path d="M6.5 1v7M3.5 5.5 6.5 8.5l3-3M1.5 10.5h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Install App
+          </motion.button>
+        )}
+      </AnimatePresence>
 
       {/* Bubble receive overlay */}
       <AnimatePresence>
