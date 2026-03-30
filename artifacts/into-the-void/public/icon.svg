@@ -1,0 +1,49 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="#0a0812"/>
+
+  <!-- Outer glow ring -->
+  <circle cx="256" cy="256" r="148" fill="none" stroke="#7c5cbf" stroke-width="1.5" stroke-opacity="0.35"/>
+  <circle cx="256" cy="256" r="112" fill="none" stroke="#9b7de0" stroke-width="1" stroke-opacity="0.25"/>
+
+  <!-- Deep void core -->
+  <radialGradient id="voidGrad" cx="50%" cy="44%" r="50%">
+    <stop offset="0%" stop-color="#1a0f2e"/>
+    <stop offset="60%" stop-color="#100b20"/>
+    <stop offset="100%" stop-color="#060410"/>
+  </radialGradient>
+  <circle cx="256" cy="252" r="108" fill="url(#voidGrad)"/>
+
+  <!-- Glow halo behind orb -->
+  <radialGradient id="haloGrad" cx="50%" cy="50%" r="50%">
+    <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.55"/>
+    <stop offset="55%" stop-color="#6d3dbd" stop-opacity="0.18"/>
+    <stop offset="100%" stop-color="#4c1d95" stop-opacity="0"/>
+  </radialGradient>
+  <circle cx="256" cy="248" r="96" fill="url(#haloGrad)"/>
+
+  <!-- Orb -->
+  <radialGradient id="orbGrad" cx="38%" cy="32%" r="60%">
+    <stop offset="0%" stop-color="#c4a8ff"/>
+    <stop offset="42%" stop-color="#8b5cf6"/>
+    <stop offset="100%" stop-color="#3b1f7a"/>
+  </radialGradient>
+  <circle cx="256" cy="248" r="62" fill="url(#orbGrad)"/>
+
+  <!-- Specular highlight -->
+  <radialGradient id="specGrad" cx="50%" cy="50%" r="50%">
+    <stop offset="0%" stop-color="#ffffff" stop-opacity="0.62"/>
+    <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+  </radialGradient>
+  <ellipse cx="236" cy="224" rx="26" ry="18" fill="url(#specGrad)"/>
+
+  <!-- Star field -->
+  <circle cx="148" cy="136" r="1.4" fill="white" fill-opacity="0.7"/>
+  <circle cx="364" cy="156" r="1.1" fill="white" fill-opacity="0.5"/>
+  <circle cx="130" cy="340" r="1.6" fill="white" fill-opacity="0.6"/>
+  <circle cx="382" cy="322" r="1.2" fill="white" fill-opacity="0.55"/>
+  <circle cx="196" cy="390" r="1.0" fill="white" fill-opacity="0.45"/>
+  <circle cx="320" cy="388" r="1.3" fill="white" fill-opacity="0.6"/>
+  <circle cx="102" cy="228" r="1.1" fill="white" fill-opacity="0.4"/>
+  <circle cx="410" cy="244" r="1.2" fill="white" fill-opacity="0.5"/>
+</svg>
