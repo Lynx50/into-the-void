@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "531662341917",
+    "project_id": "into-the-void-app",
+    "storage_bucket": "into-the-void-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:531662341917:android:5b348c294a21a90a6a83f4",
+        "android_client_info": {
+          "package_name": "com.intothevoid.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBd96OY54-J3802p6SygHonEGAk54xMAtc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

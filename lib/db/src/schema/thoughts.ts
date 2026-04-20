@@ -2,12 +2,20 @@ import { pgTable, text, serial, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
+export const anonymousUsersTable = pgTable("anonymous_users", {
+  id: text("id").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type AnonymousUser = typeof anonymousUsersTable.$inferSelect;
+
 export const thoughtsTable = pgTable("thoughts", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull(),
   content: text("content").notNull(),
   mood: text("mood"),
-  category: text("category"),   // 'relatable' | 'wisdom' | 'curious' | null (treated as relatable)
+  category: text("category"),
   feltThisCount: integer("felt_this_count").notNull().default(0),
   madeThinkCount: integer("made_think_count").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
