@@ -29,6 +29,7 @@ export const SubmitThoughtBody = zod.object({
  */
 export const ReceiveThoughtBody = zod.object({
   userId: zod.string(),
+  excludeThoughtIds: zod.array(zod.number().int().positive()).max(500).optional(),
 });
 
 export const ReceiveThoughtResponse = zod.object({

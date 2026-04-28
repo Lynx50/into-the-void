@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { MOODS } from "@/components/mood-icon";
 import {
   getHapticsEnabled,
   setHapticsEnabled,
@@ -117,6 +118,34 @@ export default function Info() {
             >
               {SUPPORT_EMAIL}
             </a>
+          </section>
+
+          <section className="rounded-3xl p-6 bg-white/[0.035] border border-white/[0.065]">
+            <h2 className="text-xl text-white/85 mb-3">Mood icons</h2>
+            <p className="text-white/60 text-sm leading-relaxed">
+              The icons under the text box are optional mood tags. They help
+              give your thought a feeling before you release it.
+            </p>
+
+            <div className="mt-4 space-y-2.5">
+              {MOODS.map((mood) => {
+                const Icon = mood.icon;
+
+                return (
+                  <div
+                    key={mood.id}
+                    className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-3"
+                  >
+                    <Icon className={`h-4 w-4 ${mood.color}`} strokeWidth={2} />
+                    <p className="text-sm text-white/62">
+                      <span className="text-white/82">{mood.label}</span>
+                      {" = "}
+                      {mood.description}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           </section>
 
           <section className="rounded-3xl p-6 bg-white/[0.035] border border-white/[0.065]">

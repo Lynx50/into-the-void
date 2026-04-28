@@ -65,6 +65,7 @@ export function FloatingBubbleReceive({
     "idle",
   );
   const [reportError, setReportError] = useState<string | null>(null);
+  const [isDismissing, setIsDismissing] = useState(false);
 
   const whisper = useMemo(
     () => WHISPERS[Math.floor(Math.random() * WHISPERS.length)],
@@ -80,16 +81,39 @@ export function FloatingBubbleReceive({
   const shapeH = isBubble ? 220 : 560;
   const shapeR = isBubble ? 110 : 32;
 
-  const handleBubbleTap = () => {
-    if (phase !== "waiting") {
+  const dismissThought = (delay = 300) => {
+    if (isDismissing) {
+      return;
+    }
+
+    setIsDismissing(true);
+    setPhase("fading");
+    setTimeout(onClose, delay);
+  };
+
+  const handleThoughtTap = () => {
+    if (phase === "arriving" || phase === "waiting") {
+      void triggerHaptic("medium");
+      void trackEvent("received_bubble_opened", {
+        has_mood: Boolean(thought.mood),
+      });
+      setPhase("tapping");
+      return;
+    }
+
+    if (isCard) {
+      void triggerHaptic("light");
+      dismissThought();
+    }
+  };
+
+  const handleBackgroundTap = () => {
+    if (phase === "fading" || isDismissing) {
       return;
     }
 
     void triggerHaptic("medium");
-    void trackEvent("received_bubble_opened", {
-      has_mood: Boolean(thought.mood),
-    });
-    setPhase("tapping");
+    dismissThought();
   };
 
   const handleReact = (type: "felt_this" | "made_think") => {
@@ -103,17 +127,20 @@ export function FloatingBubbleReceive({
     reactMutation.mutate({ id: thought.id, data: { userId, reactionType: type } });
 
     setTimeout(() => {
-      setPhase("fading");
-      setTimeout(onClose, 500);
+      dismissThought(500);
     }, 1800);
   };
 
   const handleSkip = () => {
-    setPhase("fading");
-    setTimeout(onClose, 450);
+    dismissThought(450);
   };
 
   const handleReceiveAnother = () => {
+    if (isDismissing) {
+      return;
+    }
+
+    setIsDismissing(true);
     setPhase("fading");
     setTimeout(() => onReceiveAnother?.(), 450);
   };
@@ -149,8 +176,7 @@ export function FloatingBubbleReceive({
     }
 
     setTimeout(() => {
-      setPhase("fading");
-      setTimeout(onClose, 450);
+      dismissThought(450);
     }, 1400);
   };
 
@@ -170,7 +196,7 @@ export function FloatingBubbleReceive({
           background:
             "radial-gradient(ellipse at center, rgba(16,8,38,0.92) 0%, rgba(4,2,14,0.98) 100%)",
         }}
-        onClick={isCard ? handleSkip : undefined}
+        onTap={handleBackgroundTap}
       />
 
       <motion.div
@@ -188,6 +214,7 @@ export function FloatingBubbleReceive({
         }}
       >
         <motion.div
+          className="touch-manipulation"
           animate={
             phase === "waiting"
               ? { y: [0, -8, 0] }
@@ -207,8 +234,8 @@ export function FloatingBubbleReceive({
               setPhase("expanding");
             }
           }}
-          style={{ cursor: phase === "waiting" ? "pointer" : "default" }}
-          onClick={handleBubbleTap}
+          style={{ cursor: phase === "waiting" || isCard ? "pointer" : "default" }}
+          onTap={handleThoughtTap}
         >
           {isBubble && (
             <div
@@ -326,6 +353,7 @@ export function FloatingBubbleReceive({
               style={{ padding: "24px 24px 20px" }}
               animate={{ opacity: isCard ? 1 : 0 }}
               transition={{ duration: 0.28, delay: isCard ? 0.08 : 0 }}
+              onTap={isCard ? handleThoughtTap : undefined}
             >
               <motion.p
                 initial={{ opacity: 0, y: 6 }}
@@ -352,10 +380,11 @@ export function FloatingBubbleReceive({
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: isCard ? 1 : 0, y: isCard ? 0 : 10 }}
                   transition={{ delay: 0.24, duration: 0.38 }}
-                  className="max-w-[260px] text-center text-[1.8rem] leading-[1.4] text-white/92"
+                  className="max-w-[260px] text-center text-[1.8rem] leading-tight text-white/92"
                   style={{
                     fontFamily: "var(--font-display)",
                     fontStyle: "italic",
+                    lineHeight: 1.22,
                   }}
                 >
                   "
@@ -382,6 +411,7 @@ export function FloatingBubbleReceive({
                 animate={{ opacity: isCard ? 1 : 0, y: isCard ? 0 : 8 }}
                 transition={{ delay: 0.42, duration: 0.35 }}
                 className="w-full shrink-0"
+                onClick={(event) => event.stopPropagation()}
               >
                 <div className="flex w-full gap-3">
                   <button

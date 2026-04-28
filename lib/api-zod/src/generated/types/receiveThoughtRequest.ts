@@ -8,4 +8,5 @@
 
 export interface ReceiveThoughtRequest {
   userId: string;
+  excludeThoughtIds?: number[];
 }

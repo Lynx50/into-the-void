@@ -8,12 +8,23 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AnimatedBackground from "@/components/animated-background";
 import { Navigation } from "@/components/navigation";
+import { prewarmOrbitExperience } from "@/hooks/use-thoughts";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import Orbit from "@/pages/orbit";
 import Info from "@/pages/info";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+    },
+    mutations: {
+      retry: 0,
+    },
+  },
+});
 const ONBOARDING_STORAGE_KEY = "into_the_void_onboarding_seen_v1";
 
 async function trackEvent(
@@ -52,6 +63,10 @@ const onboardingSteps: OnboardingStep[] = [
   {
     title: "Release",
     body: "Let go of an anonymous thought and send it into the dark.",
+  },
+  {
+    title: "Choose a mood",
+    body: "Before you release a thought, you can tap a mood icon to give it a feeling — heavy, light, quiet, charged, or hopeful. It's optional.",
   },
   {
     title: "Receive",
@@ -215,6 +230,9 @@ function AppShell() {
 function App() {
   useEffect(() => {
     trackEvent("app_open");
+    void prewarmOrbitExperience().catch(() => {
+      // Quiet warm-up should never affect first render.
+    });
   }, []);
 
   return (

@@ -1,4 +1,4 @@
-const API_TIMEOUT_MS = 10000;
+const API_TIMEOUT_MS = 65000;
 const USER_ID_KEY = "void_user_id";
 const SESSION_TOKEN_KEY = "void_session_token";
 const SESSION_HEADER = "x-void-session";
@@ -67,6 +67,10 @@ export function clearAnonymousSession(): void {
   localStorage.removeItem(SESSION_TOKEN_KEY);
 }
 
+function clearSessionToken(): void {
+  localStorage.removeItem(SESSION_TOKEN_KEY);
+}
+
 function buildTimeoutError(): {
   status: number;
   message: string;
@@ -74,9 +78,29 @@ function buildTimeoutError(): {
 } {
   return {
     status: 408,
-    message: "The request took too long. Check that the API server is running.",
+    message:
+      "The server is taking a while to wake up. Please wait a moment and try again.",
     body: {
-      error: "The request took too long. Check that the API server is running.",
+      error:
+        "The server is taking a while to wake up. Please wait a moment and try again.",
+    },
+  };
+}
+
+function isOffline(): boolean {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
+function buildOfflineError(): {
+  status: number;
+  message: string;
+  body: { error: string };
+} {
+  return {
+    status: 0,
+    message: "No internet connection. Check your signal and try again.",
+    body: {
+      error: "No internet connection. Check your signal and try again.",
     },
   };
 }
@@ -84,10 +108,17 @@ function buildTimeoutError(): {
 export async function apiFetch<T>(
   path: string,
   init?: RequestInit,
-  options?: { skipSession?: boolean },
+  options?: { skipSession?: boolean; timeoutMs?: number },
 ): Promise<T> {
+  if (isOffline()) {
+    throw buildOfflineError();
+  }
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const timeout = setTimeout(
+    () => controller.abort(),
+    options?.timeoutMs ?? API_TIMEOUT_MS,
+  );
 
   try {
     const headers = new Headers(init?.headers ?? {});
@@ -118,7 +149,7 @@ export async function apiFetch<T>(
 
     if (!response.ok) {
       if (response.status === 401 && !options?.skipSession) {
-        clearAnonymousSession();
+        clearSessionToken();
       }
 
       throw {
@@ -141,13 +172,17 @@ export async function apiFetch<T>(
       throw error;
     }
 
+    if (isOffline()) {
+      throw buildOfflineError();
+    }
+
     throw {
       status: 0,
       message:
-        "Unable to reach the API server. Check your phone, Wi-Fi, and backend.",
+        "Unable to reach the API server. Check your internet connection and try again.",
       body: {
         error:
-          "Unable to reach the API server. Check your phone, Wi-Fi, and backend.",
+          "Unable to reach the API server. Check your internet connection and try again.",
       },
     };
   } finally {
@@ -176,7 +211,7 @@ export async function initializeAnonymousSession(
   force = false,
 ): Promise<AnonymousSession> {
   if (force) {
-    clearAnonymousSession();
+    clearSessionToken();
   } else {
     const existingSession = getStoredAnonymousSession();
     if (existingSession) {

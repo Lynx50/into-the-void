@@ -98,6 +98,67 @@ function getStartOfUtcDay(): Date {
   );
 }
 
+function normalizeExcludedThoughtIds(ids: unknown): number[] {
+  if (!Array.isArray(ids)) {
+    return [];
+  }
+
+  return [
+    ...new Set(
+      ids
+        .map((id) => Number(id))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ),
+  ].slice(0, 500);
+}
+
+async function findReceiveCandidate(
+  userId: string,
+  excludedThoughtIds: number[],
+) {
+  const notReported = sql`(
+    SELECT COUNT(*) FROM reactions
+    WHERE reactions.thought_id = ${thoughtsTable.id}
+      AND reactions.reaction_type LIKE 'report%'
+  ) < ${REPORT_HIDE_THRESHOLD}`;
+
+  const notAlreadySeen = sql`${thoughtsTable.id} NOT IN (
+    SELECT thought_id FROM receives WHERE user_id = ${userId}
+  )`;
+
+  const notClientSeen =
+    excludedThoughtIds.length > 0
+      ? sql`${thoughtsTable.id} NOT IN (${sql.join(
+          excludedThoughtIds.map((id) => sql`${id}`),
+          sql`,`,
+        )})`
+      : sql`TRUE`;
+
+  const thoughts = await db
+    .select({
+      id: thoughtsTable.id,
+      content: thoughtsTable.content,
+      mood: thoughtsTable.mood,
+      feltThisCount: thoughtsTable.feltThisCount,
+      madeThinkCount: thoughtsTable.madeThinkCount,
+    })
+    .from(thoughtsTable)
+    .where(
+      and(
+        ne(thoughtsTable.userId, userId),
+        notReported,
+        notAlreadySeen,
+        notClientSeen,
+      ),
+    )
+    .orderBy(
+      sql`RANDOM() * (${thoughtsTable.feltThisCount} + ${thoughtsTable.madeThinkCount} + 1) DESC`,
+    )
+    .limit(1);
+
+  return thoughts[0];
+}
+
 function pruneRateLimitBuckets(now = Date.now()): void {
   if (now - lastBucketPruneAt < 60_000) {
     return;
@@ -343,6 +404,9 @@ router.post("/thoughts/receive", receiveRateLimit, async (req, res) => {
   }
 
   const { userId } = auth;
+  const excludedThoughtIds = normalizeExcludedThoughtIds(
+    parsed.data.excludeThoughtIds,
+  );
 
   try {
     await ensureAnonymousUser(userId);
@@ -381,34 +445,7 @@ router.post("/thoughts/receive", receiveRateLimit, async (req, res) => {
       return;
     }
 
-    const notReported = sql`(
-      SELECT COUNT(*) FROM reactions
-      WHERE reactions.thought_id = ${thoughtsTable.id}
-        AND reactions.reaction_type LIKE 'report%'
-    ) < ${REPORT_HIDE_THRESHOLD}`;
-
-    const notAlreadySeen = sql`${thoughtsTable.id} NOT IN (
-      SELECT thought_id FROM receives WHERE user_id = ${userId}
-    )`;
-
-    const thoughts = await db
-      .select({
-        id: thoughtsTable.id,
-        content: thoughtsTable.content,
-        mood: thoughtsTable.mood,
-        feltThisCount: thoughtsTable.feltThisCount,
-        madeThinkCount: thoughtsTable.madeThinkCount,
-      })
-      .from(thoughtsTable)
-      .where(
-        and(ne(thoughtsTable.userId, userId), notReported, notAlreadySeen),
-      )
-      .orderBy(
-        sql`RANDOM() * (${thoughtsTable.feltThisCount} + ${thoughtsTable.madeThinkCount} + 1) DESC`,
-      )
-      .limit(1);
-
-    const thought = thoughts[0];
+    const thought = await findReceiveCandidate(userId, excludedThoughtIds);
 
     if (!thought) {
       res.status(404).json({
@@ -433,6 +470,192 @@ router.post("/thoughts/receive", receiveRateLimit, async (req, res) => {
   } catch (err: any) {
     console.error("POST /thoughts/receive ERROR:", err);
     res.status(500).json({ error: "Failed to receive thought" });
+  }
+});
+
+router.post("/thoughts/receive-preview", receiveRateLimit, async (req, res) => {
+  const parsed = ReceiveThoughtBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+
+  const auth = resolveAuthenticatedUserId(req, parsed.data.userId);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  const { userId } = auth;
+  const excludedThoughtIds = normalizeExcludedThoughtIds(
+    parsed.data.excludeThoughtIds,
+  );
+
+  try {
+    await ensureAnonymousUser(userId);
+
+    const [userThoughtCount] = await db
+      .select({ count: count() })
+      .from(thoughtsTable)
+      .where(eq(thoughtsTable.userId, userId));
+
+    if ((userThoughtCount?.count ?? 0) === 0) {
+      res.status(403).json({
+        error: "Release a thought first before you can receive one.",
+      });
+      return;
+    }
+
+    const startOfDay = getStartOfUtcDay();
+    const [todayCountResult] = await db
+      .select({ count: count() })
+      .from(receivesTable)
+      .where(
+        and(
+          eq(receivesTable.userId, userId),
+          gte(receivesTable.receivedAt, startOfDay),
+        ),
+      );
+
+    const todayCount = Number(todayCountResult?.count ?? 0);
+    const isDev = process.env.NODE_ENV === "development";
+    if (!isDev && todayCount >= DAILY_RECEIVE_LIMIT) {
+      res.status(429).json({
+        error: "Daily receive limit reached. Come back tomorrow.",
+      });
+      return;
+    }
+
+    const thought = await findReceiveCandidate(userId, excludedThoughtIds);
+
+    if (!thought) {
+      res.status(404).json({
+        error: "No new thoughts right now. Release one and come back later.",
+      });
+      return;
+    }
+
+    res.json(thought);
+  } catch (err: any) {
+    console.error("POST /thoughts/receive-preview ERROR:", err);
+    res.status(500).json({ error: "Failed to preview thought" });
+  }
+});
+
+router.post("/thoughts/receive-claim", receiveRateLimit, async (req, res) => {
+  const rawUserId = req.body?.userId;
+  const thoughtId = Number(req.body?.thoughtId);
+
+  if (
+    typeof rawUserId !== "string" ||
+    !rawUserId.trim() ||
+    !Number.isInteger(thoughtId) ||
+    thoughtId <= 0
+  ) {
+    res.status(400).json({ error: "Invalid request body" });
+    return;
+  }
+
+  const auth = resolveAuthenticatedUserId(req, rawUserId);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  const { userId } = auth;
+
+  try {
+    await ensureAnonymousUser(userId);
+
+    const [userThoughtCount] = await db
+      .select({ count: count() })
+      .from(thoughtsTable)
+      .where(eq(thoughtsTable.userId, userId));
+
+    if ((userThoughtCount?.count ?? 0) === 0) {
+      res.status(403).json({
+        error: "Release a thought first before you can receive one.",
+      });
+      return;
+    }
+
+    const startOfDay = getStartOfUtcDay();
+    const [todayCountResult] = await db
+      .select({ count: count() })
+      .from(receivesTable)
+      .where(
+        and(
+          eq(receivesTable.userId, userId),
+          gte(receivesTable.receivedAt, startOfDay),
+        ),
+      );
+
+    const todayCount = Number(todayCountResult?.count ?? 0);
+    const isDev = process.env.NODE_ENV === "development";
+    if (!isDev && todayCount >= DAILY_RECEIVE_LIMIT) {
+      res.status(429).json({
+        error: "Daily receive limit reached. Come back tomorrow.",
+      });
+      return;
+    }
+
+    const [existingReceive] = await db
+      .select({ thoughtId: receivesTable.thoughtId })
+      .from(receivesTable)
+      .where(
+        and(
+          eq(receivesTable.userId, userId),
+          eq(receivesTable.thoughtId, thoughtId),
+        ),
+      )
+      .limit(1);
+
+    if (existingReceive) {
+      res.status(409).json({ error: "Thought already received." });
+      return;
+    }
+
+    const notReported = sql`(
+      SELECT COUNT(*) FROM reactions
+      WHERE reactions.thought_id = ${thoughtsTable.id}
+        AND reactions.reaction_type LIKE 'report%'
+    ) < ${REPORT_HIDE_THRESHOLD}`;
+
+    const [thought] = await db
+      .select({
+        id: thoughtsTable.id,
+        content: thoughtsTable.content,
+        mood: thoughtsTable.mood,
+        feltThisCount: thoughtsTable.feltThisCount,
+        madeThinkCount: thoughtsTable.madeThinkCount,
+      })
+      .from(thoughtsTable)
+      .where(
+        and(
+          eq(thoughtsTable.id, thoughtId),
+          ne(thoughtsTable.userId, userId),
+          notReported,
+        ),
+      )
+      .limit(1);
+
+    if (!thought) {
+      res.status(404).json({
+        error: "That thought is no longer available.",
+      });
+      return;
+    }
+
+    await db.insert(receivesTable).values({
+      userId,
+      thoughtId: thought.id,
+      receivedAt: new Date(),
+    });
+
+    res.json(thought);
+  } catch (err: any) {
+    console.error("POST /thoughts/receive-claim ERROR:", err);
+    res.status(500).json({ error: "Failed to claim thought" });
   }
 });
 

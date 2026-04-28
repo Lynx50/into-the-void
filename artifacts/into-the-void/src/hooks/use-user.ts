@@ -11,7 +11,7 @@ type UseUserState = {
   isReady: boolean;
   isLoading: boolean;
   sessionError: string | null;
-  refreshSession: () => Promise<void>;
+  refreshSession: (force?: boolean) => Promise<void>;
 };
 
 let sessionInitializationPromise: Promise<{ userId: string }> | null = null;
@@ -36,12 +36,12 @@ export function useUser(): UseUserState {
   );
   const [sessionError, setSessionError] = useState<string | null>(null);
 
-  const refreshSession = async () => {
+  const refreshSession = async (force = false) => {
     setStatus("loading");
     setSessionError(null);
 
     try {
-      const session = await ensureAnonymousSession(true);
+      const session = await ensureAnonymousSession(force);
       setUserId(session.userId);
       setStatus("ready");
       setSessionError(null);

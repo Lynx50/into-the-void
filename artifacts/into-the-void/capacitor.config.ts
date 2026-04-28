@@ -5,11 +5,11 @@ const config: CapacitorConfig = {
   appName: "Into the Void",
   webDir: "dist/public",
   server: {
-    cleartext: true,
+    cleartext: false,
   },
   android: {
-    cleartext: true,
-    allowMixedContent: true,
+    cleartext: false,
+    allowMixedContent: false,
     loggingBehavior: "debug",
   },
 };

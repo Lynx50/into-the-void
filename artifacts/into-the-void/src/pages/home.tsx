@@ -1,25 +1,37 @@
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send } from "lucide-react";
 import { ReceivedThought } from "@workspace/api-client-react";
 import { FloatingBubbleReceive } from "@/components/floating-bubble-receive";
 import { MOODS, type MoodId } from "@/components/mood-icon";
 import {
+  markReceivedThoughtAsShown,
+  popPreloadedReceiveThought,
+  prewarmOrbitExperience,
+  prewarmReceiveExperience,
   saveThoughtToOrbitAfterRelease,
+  useClaimReceivedThought,
   useMyThoughts,
   useReceiveCount,
   useReceiveThought,
   useSubmitThought,
   useUser,
 } from "@/hooks/use-thoughts";
+import { apiFetch } from "@/lib/api";
 import { useNetwork } from "@/hooks/use-network";
 import { usePwaInstall } from "@/hooks/use-pwa-install";
 import { triggerHaptic } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
 
 export default function Home() {
+  const RELEASE_SUCCESS_MS = 3800;
+  const RELEASE_FEEDBACK_MS = 1100;
+  const RECEIVE_CALM_WAIT_MS = 1200;
+
   const { userId, isReady, isLoading, sessionError, refreshSession } = useUser();
-  const { isOnline } = useNetwork();
+  const { isOnline, checkNetwork } = useNetwork();
+  const queryClient = useQueryClient();
 
   const [content, setContent] = useState("");
   const [selectedMood, setSelectedMood] = useState<MoodId | null>(null);
@@ -30,11 +42,29 @@ export default function Home() {
   );
   const [receiveError, setReceiveError] = useState<string | null>(null);
   const [newReactionMessage, setNewReactionMessage] = useState(false);
+  const [hasUnlockedReceive, setHasUnlockedReceive] = useState(false);
+  const [isReleaseOptimistic, setIsReleaseOptimistic] = useState(false);
+  const [receivePendingMessage, setReceivePendingMessage] = useState<string | null>(
+    null,
+  );
+  const [isReceiving, setIsReceiving] = useState(false);
 
   const previousReactionCountRef = useRef(0);
+  const releaseSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const releaseFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const receivePendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const prewarmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startupPrewarmRef = useRef<string | null>(null);
 
   const submitMutation = useSubmitThought();
   const receiveMutation = useReceiveThought();
+  const claimReceiveMutation = useClaimReceivedThought();
   const { data: receiveCountData, isLoading: isReceiveCountLoading } =
     useReceiveCount();
   const { data: myThoughts } = useMyThoughts({
@@ -49,22 +79,29 @@ export default function Home() {
   const receiveLimit = receiveCountData?.limit ?? 3;
   const isOverLimit = !isReceiveCountLoading && remainingReceives <= 0;
 
-  const hasSubmitted = !!(myThoughts && myThoughts.length > 0);
+  const hasSubmittedThoughts = !!(myThoughts && myThoughts.length > 0);
+  const hasSubmitted = hasSubmittedThoughts || hasUnlockedReceive;
   const lastThought = myThoughts?.[0];
   const lastThoughtReactions = lastThought
     ? (lastThought.feltThisCount ?? 0) + (lastThought.madeThinkCount ?? 0)
     : 0;
 
   const submitDisabled =
-    !isOnline || !isReady || !content.trim() || submitMutation.isPending || isLoading;
+    !isOnline || !content.trim() || submitMutation.isPending || isReleaseOptimistic;
 
   const receiveDisabled =
     !isOnline ||
-    receiveMutation.isPending ||
+    isReceiving ||
     isOverLimit ||
     !isReady ||
     !hasSubmitted ||
     isLoading;
+
+  useEffect(() => {
+    if (hasSubmittedThoughts) {
+      setHasUnlockedReceive(true);
+    }
+  }, [hasSubmittedThoughts]);
 
   useEffect(() => {
     const currentCount = lastThoughtReactions ?? 0;
@@ -90,30 +127,155 @@ export default function Home() {
 
   useEffect(() => {
     if (!isOnline) {
+      setIsReceiving(false);
       setSubmitError(null);
-      setReceiveError("You're offline right now.");
+      setReceiveError("No internet connection.");
       return;
     }
 
     setReceiveError(null);
   }, [isOnline]);
 
+  useEffect(() => {
+    if (isReceiving) {
+      if (receivePendingTimeoutRef.current) {
+        clearTimeout(receivePendingTimeoutRef.current);
+      }
+
+      receivePendingTimeoutRef.current = setTimeout(() => {
+        setReceivePendingMessage("Listening for a thought...");
+      }, RECEIVE_CALM_WAIT_MS);
+
+      return;
+    }
+
+    if (receivePendingTimeoutRef.current) {
+      clearTimeout(receivePendingTimeoutRef.current);
+      receivePendingTimeoutRef.current = null;
+    }
+
+    setReceivePendingMessage(null);
+  }, [isReceiving]);
+
+  useEffect(() => {
+    if (!isOnline || !userId || startupPrewarmRef.current === userId) {
+      return;
+    }
+
+    startupPrewarmRef.current = userId;
+    void prewarmReceiveExperience(userId).catch(() => {
+      // Quiet warm-up should never interrupt first render.
+    });
+  }, [isOnline, userId]);
+
+  useEffect(() => {
+    if (!isOnline || !content.trim()) {
+      if (prewarmTimeoutRef.current) {
+        clearTimeout(prewarmTimeoutRef.current);
+        prewarmTimeoutRef.current = null;
+      }
+      return;
+    }
+
+    if (prewarmTimeoutRef.current) {
+      clearTimeout(prewarmTimeoutRef.current);
+    }
+
+    prewarmTimeoutRef.current = setTimeout(() => {
+      void prewarmReceiveExperience(userId)
+        .then((activeUserId) =>
+          Promise.allSettled([
+            queryClient.setQueryData(
+              ["receive-count", activeUserId],
+              queryClient.getQueryData(["receive-count", activeUserId]),
+            ),
+            queryClient.prefetchQuery({
+              queryKey: ["receive-count", activeUserId],
+              queryFn: () =>
+                apiFetch<{ count: number; limit: number; remaining: number }>(
+                  `/thoughts/receive-count?userId=${encodeURIComponent(activeUserId)}`,
+                ),
+            }),
+            queryClient.prefetchQuery({
+              queryKey: ["my-thoughts", activeUserId],
+              queryFn: () =>
+                apiFetch<any[]>(
+                  `/thoughts/my?userId=${encodeURIComponent(activeUserId)}`,
+                ),
+            }),
+          ]),
+        )
+        .catch(() => {
+          // Quiet prewarming should never interrupt the main flow.
+        });
+    }, 500);
+
+    return () => {
+      if (prewarmTimeoutRef.current) {
+        clearTimeout(prewarmTimeoutRef.current);
+        prewarmTimeoutRef.current = null;
+      }
+    };
+  }, [content, isOnline, queryClient, userId]);
+
+  useEffect(() => {
+    return () => {
+      if (releaseSuccessTimeoutRef.current) {
+        clearTimeout(releaseSuccessTimeoutRef.current);
+      }
+      if (releaseFeedbackTimeoutRef.current) {
+        clearTimeout(releaseFeedbackTimeoutRef.current);
+      }
+      if (receivePendingTimeoutRef.current) {
+        clearTimeout(receivePendingTimeoutRef.current);
+      }
+      if (prewarmTimeoutRef.current) {
+        clearTimeout(prewarmTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleRetryConnection = async () => {
+    const online = checkNetwork();
+
+    if (!online) {
+      setSubmitError(null);
+      setReceiveError("No internet connection.");
+      return;
+    }
+
+    setSubmitError(null);
+    setReceiveError(null);
+    submitMutation.reset();
+    receiveMutation.reset();
+    claimReceiveMutation.reset();
+
+    await refreshSession(false);
+
+    const activeUserId = userId || startupPrewarmRef.current;
+    if (!activeUserId) {
+      return;
+    }
+
+    await Promise.allSettled([
+      queryClient.invalidateQueries({ queryKey: ["receive-count", activeUserId] }),
+      queryClient.invalidateQueries({ queryKey: ["my-thoughts", activeUserId] }),
+      queryClient.refetchQueries({ queryKey: ["receive-count", activeUserId] }),
+      queryClient.refetchQueries({ queryKey: ["my-thoughts", activeUserId] }),
+      prewarmReceiveExperience(activeUserId),
+    ]);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!isOnline) {
-      setSubmitError("You're offline right now. Reconnect to release your thought.");
+      setSubmitError("No internet connection.");
       setTimeout(() => setSubmitError(null), 4000);
       return;
     }
 
-    if (!isReady) {
-      setSubmitError("Still connecting to the void. Try again in a moment.");
-      setTimeout(() => setSubmitError(null), 4000);
-      return;
-    }
-
-    if (!content.trim() || !userId || submitMutation.isPending) {
+    if (!content.trim() || submitMutation.isPending || isReleaseOptimistic) {
       return;
     }
 
@@ -123,9 +285,29 @@ export default function Home() {
     const moodToSubmit = selectedMood;
 
     setSubmitError(null);
+    setIsReleaseOptimistic(true);
+    setHasUnlockedReceive(true);
+    setContent("");
+    setSelectedMood(null);
+    setIsSuccess(true);
+
+    if (releaseSuccessTimeoutRef.current) {
+      clearTimeout(releaseSuccessTimeoutRef.current);
+    }
+    if (releaseFeedbackTimeoutRef.current) {
+      clearTimeout(releaseFeedbackTimeoutRef.current);
+    }
+
+    releaseSuccessTimeoutRef.current = setTimeout(() => {
+      setIsSuccess(false);
+    }, RELEASE_SUCCESS_MS);
+
+    releaseFeedbackTimeoutRef.current = setTimeout(() => {
+      setIsReleaseOptimistic(false);
+    }, RELEASE_FEEDBACK_MS);
 
     submitMutation.mutate(
-      { data: { userId, content: trimmedContent, mood: moodToSubmit } },
+      { data: { userId: userId || undefined, content: trimmedContent, mood: moodToSubmit } },
       {
         onSuccess: () => {
           saveThoughtToOrbitAfterRelease({
@@ -135,20 +317,35 @@ export default function Home() {
             feltThisCount: 0,
             madeThinkCount: 0,
           });
-
-          setContent("");
-          setSelectedMood(null);
-          setIsSuccess(true);
-          setTimeout(() => setIsSuccess(false), 3500);
+          void prewarmReceiveExperience(userId || undefined).catch(() => {
+            // Quiet prewarm should not affect release success.
+          });
+          void prewarmOrbitExperience(userId || undefined).catch(() => {
+            // Quiet prewarm should not affect release success.
+          });
         },
         onError: (err: any) => {
+          setIsReleaseOptimistic(false);
+          setIsSuccess(false);
+          setContent(trimmedContent);
+          setSelectedMood(moodToSubmit);
+
+          if (releaseSuccessTimeoutRef.current) {
+            clearTimeout(releaseSuccessTimeoutRef.current);
+            releaseSuccessTimeoutRef.current = null;
+          }
+          if (releaseFeedbackTimeoutRef.current) {
+            clearTimeout(releaseFeedbackTimeoutRef.current);
+            releaseFeedbackTimeoutRef.current = null;
+          }
+
           if (err?.status === 422) {
             setSubmitError("This thought can't be shared here.");
           } else if (err?.status === 401) {
             setSubmitError("Your session expired. Reconnecting now.");
-            void refreshSession();
+            void refreshSession(true);
           } else if (err?.status === 0) {
-            setSubmitError("Couldn't reach the server.");
+            setSubmitError("No internet connection. Check your signal and try again.");
           } else {
             setSubmitError("Couldn't release that one. Try again.");
           }
@@ -160,10 +357,10 @@ export default function Home() {
 
   const handleReceive = () => {
     if (!isOnline) {
-      setReceiveError("You're offline right now. Reconnect to receive a thought.");
+      setReceiveError("No internet connection.");
       setTimeout(() => {
         setReceiveError((current) =>
-          current === "You're offline right now. Reconnect to receive a thought."
+          current === "No internet connection."
             ? null
             : current,
         );
@@ -172,12 +369,13 @@ export default function Home() {
     }
 
     if (!isReady) {
-      setReceiveError("Still connecting to the void. Try again in a moment.");
+      void prewarmReceiveExperience(userId || undefined).catch(() => {
+        // Quiet retry.
+      });
+      setReceiveError("Waking the void. Try again in a moment.");
       setTimeout(() => {
         setReceiveError((current) =>
-          current === "Still connecting to the void. Try again in a moment."
-            ? null
-            : current,
+          current === "Waking the void. Try again in a moment." ? null : current,
         );
       }, 4000);
       return;
@@ -199,11 +397,42 @@ export default function Home() {
 
     void triggerHaptic("medium");
     setReceiveError(null);
+    setIsReceiving(true);
+
+    const cachedThought = popPreloadedReceiveThought(userId);
+    if (cachedThought) {
+      markReceivedThoughtAsShown(userId, cachedThought.id);
+      setReceivedThought(cachedThought);
+      setIsReceiving(false);
+
+      claimReceiveMutation.mutate(
+        {
+          data: {
+            userId,
+            thoughtId: cachedThought.id,
+          },
+        },
+        {
+          onSettled: () => {
+            void prewarmReceiveExperience(userId).catch(() => {
+              // Quiet refill should not interrupt display.
+            });
+          },
+        },
+      );
+      return;
+    }
 
     receiveMutation.mutate(
       { data: { userId } },
       {
-        onSuccess: (data) => setReceivedThought(data),
+        onSuccess: (data) => {
+          markReceivedThoughtAsShown(userId, data.id);
+          setReceivedThought(data);
+          void prewarmReceiveExperience(userId).catch(() => {
+            // Quiet refill should not interrupt display.
+          });
+        },
         onError: (err: any) => {
           if (err?.status === 404) {
             setReceiveError("No new thoughts right now. Release one and come back later.");
@@ -212,16 +441,19 @@ export default function Home() {
           } else if (err?.status === 403) {
             setReceiveError("Release a thought first to unlock receiving.");
           } else if (err?.status === 408) {
-            setReceiveError("The void took too long to answer. Try again.");
+            setReceiveError("Couldn't reach the void. Try again.");
           } else if (err?.status === 401) {
             setReceiveError("Your session expired. Reconnecting now.");
-            void refreshSession();
+            void refreshSession(true);
           } else if (err?.status === 0) {
-            setReceiveError("Couldn't reach the server.");
+            setReceiveError("No internet connection. Check your signal and try again.");
           } else {
-            setReceiveError("Failed to reach the void.");
+            setReceiveError("Couldn't reach the void. Try again.");
           }
           setTimeout(() => setReceiveError(null), 4000);
+        },
+        onSettled: () => {
+          setIsReceiving(false);
         },
       },
     );
@@ -289,16 +521,26 @@ export default function Home() {
 
         <AnimatePresence>
           {!isOnline && (
-            <motion.p
+            <motion.div
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 4 }}
               transition={{ duration: 0.5 }}
-              className="mt-2.5 text-[11px] tracking-wide text-red-400/70"
-              style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
+              className="mt-3 flex flex-col items-center gap-2 pointer-events-auto"
             >
-              You're offline. Reconnect to send or receive.
-            </motion.p>
+              <p
+                className="text-[11px] tracking-wide text-red-400/70"
+                style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
+              >
+                No internet connection.
+              </p>
+              <button
+                onClick={() => void handleRetryConnection()}
+                className="px-4 py-2 rounded-full text-[10px] tracking-[0.22em] uppercase text-white/70 border border-white/10 bg-white/5 hover:bg-white/10 transition-colors"
+              >
+                Retry connection
+              </button>
+            </motion.div>
           )}
         </AnimatePresence>
 
@@ -318,7 +560,7 @@ export default function Home() {
                 {sessionError}
               </p>
               <button
-                onClick={() => void refreshSession()}
+                onClick={() => void handleRetryConnection()}
                 className="px-4 py-2 rounded-full text-[10px] tracking-[0.22em] uppercase text-white/70 border border-white/10 bg-white/5 hover:bg-white/10 transition-colors"
               >
                 Retry connection
@@ -347,12 +589,24 @@ export default function Home() {
               onChange={(e) => setContent(e.target.value)}
               placeholder="Say it... no one knows it's you"
               maxLength={280}
-              className="w-full bg-transparent border-none text-xl sm:text-2xl text-white/85 placeholder:text-white/18 focus:outline-none focus:ring-0 resize-none min-h-[110px] leading-relaxed"
-              style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
+              className="w-full bg-transparent border-none text-xl sm:text-2xl text-white/85 placeholder:text-white/18 focus:outline-none focus:ring-0 resize-none min-h-[110px] leading-tight"
+              style={{
+                fontFamily: "var(--font-display)",
+                fontStyle: "italic",
+                lineHeight: 1.22,
+              }}
             />
 
             <div className="flex justify-between items-center mt-5 pt-5 border-t border-white/[0.05]">
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2">
+                <p
+                  className="text-[10px] tracking-[0.22em] uppercase text-white/24"
+                  style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
+                >
+                  Optional mood
+                </p>
+
+                <div className="flex gap-2">
                 {MOODS.map((mood) => {
                   const Icon = mood.icon;
                   const isSelected = selectedMood === mood.id;
@@ -365,7 +619,8 @@ export default function Home() {
                         void triggerHaptic("light");
                         setSelectedMood(isSelected ? null : mood.id);
                       }}
-                      title={mood.label}
+                      aria-label={mood.ariaLabel}
+                      title={mood.ariaLabel}
                       className={cn(
                         "w-8 h-8 rounded-full flex items-center justify-center transition-all duration-400",
                         isSelected
@@ -382,22 +637,23 @@ export default function Home() {
                     </button>
                   );
                 })}
+                </div>
               </div>
 
               <button
                 type="submit"
                 disabled={submitDisabled}
                 className={cn(
-                  "flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium tracking-wide transition-all duration-500",
+                  "flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium tracking-wide transition-all duration-300 active:scale-[0.97]",
                   !submitDisabled
                     ? "bg-primary/65 hover:bg-primary/85 text-white cursor-pointer shadow-[0_0_24px_rgba(140,100,255,0.22)]"
                     : "bg-white/5 text-white/22 cursor-not-allowed",
                 )}
               >
                 {submitMutation.isPending
-                  ? "Releasing..."
-                  : isLoading
-                    ? "Connecting..."
+                  ? "Released"
+                  : isReleaseOptimistic || isSuccess
+                    ? "Released"
                     : "Release"}
                 <Send className="w-3.5 h-3.5" />
               </button>
@@ -450,18 +706,6 @@ export default function Home() {
               style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
             >
               You're offline right now.
-            </motion.p>
-          ) : isLoading ? (
-            <motion.p
-              key="connecting"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.8 }}
-              className="text-sm text-white/30 tracking-wide"
-              style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
-            >
-              Connecting to the void...
             </motion.p>
           ) : hasSubmitted && !isOverLimit ? (
             <motion.p
@@ -538,7 +782,7 @@ export default function Home() {
           )}
 
           <div className="relative z-10 flex flex-col items-center gap-1">
-            {receiveMutation.isPending ? (
+            {isReceiving ? (
               <motion.div
                 animate={{ rotate: 360 }}
                 transition={{ repeat: Infinity, duration: 3.5, ease: "linear" }}
@@ -571,6 +815,17 @@ export default function Home() {
                 className="text-xs text-red-400/60 tracking-wide"
               >
                 {receiveError}
+              </motion.p>
+            ) : receivePendingMessage ? (
+              <motion.p
+                key="pending"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-xs text-white/28 tracking-wide"
+                style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
+              >
+                {receivePendingMessage}
               </motion.p>
             ) : receiveCountData && isOnline ? (
               <motion.p
