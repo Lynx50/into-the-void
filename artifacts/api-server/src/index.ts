@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
+import { SEED_THOUGHTS } from "./data/seed-thoughts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,48 +19,6 @@ const [{ db, thoughtsTable }, { default: app }] = await Promise.all([
 ]);
 
 const SEED_USER_ID = "__seed__";
-const SEED_THOUGHTS: Array<{
-  content: string;
-  mood: string | null;
-  category: "relatable" | "wisdom" | "curious";
-}> = [
-  {
-    content:
-      "I wonder if the version of me that exists in other people's memories is someone I'd even recognize.",
-    mood: "thoughtful",
-    category: "wisdom",
-  },
-  {
-    content:
-      "Some friendships quietly end without a final scene, and that's somehow harder than the ones that do.",
-    mood: "thoughtful",
-    category: "wisdom",
-  },
-  {
-    content:
-      "I miss someone who still exists. That's the part I don't know how to explain to anyone.",
-    mood: "sad",
-    category: "relatable",
-  },
-  {
-    content:
-      "I had a moment today where I looked around and thought: this is enough. This is actually enough.",
-    mood: "happy",
-    category: "curious",
-  },
-  {
-    content:
-      "I keep explaining myself and somehow becoming less understood with every word.",
-    mood: "frustrated",
-    category: "relatable",
-  },
-  {
-    content:
-      "I said 'no worries' to something that has been worrying me for three months.",
-    mood: "funny",
-    category: "curious",
-  },
-];
 
 function loadEnvFile(filePath: string): void {
   if (!fs.existsSync(filePath)) {
@@ -254,24 +213,40 @@ async function ensureDatabaseSchema() {
 }
 
 async function ensureSeedThoughts() {
-  const result = await db.execute(sql<{ count: number }>`
-    SELECT COUNT(*)::int AS count
-    FROM thoughts;
+  const existingSeedRows = await db.execute(sql<{ content: string }>`
+    SELECT content
+    FROM thoughts
+    WHERE user_id = ${SEED_USER_ID};
   `);
 
-  const thoughtCount = Number(result.rows[0]?.count ?? 0);
-  if (thoughtCount > 0) {
+  const existingSeedContents = new Set(
+    existingSeedRows.rows
+      .map((row) =>
+        typeof row.content === "string" ? row.content.trim() : "",
+      )
+      .filter((content): content is string => Boolean(content)),
+  );
+
+  const missingSeedThoughts = SEED_THOUGHTS.filter(
+    (thought) => !existingSeedContents.has(thought.content.trim()),
+  );
+
+  if (missingSeedThoughts.length === 0) {
     return;
   }
 
-  await db.insert(thoughtsTable).values(
-    SEED_THOUGHTS.map((thought) => ({
-      userId: SEED_USER_ID,
-      content: thought.content,
-      mood: thought.mood,
-      category: thought.category,
-    })),
-  );
+  const batchSize = 100;
+  for (let index = 0; index < missingSeedThoughts.length; index += batchSize) {
+    const batch = missingSeedThoughts.slice(index, index + batchSize);
+    await db.insert(thoughtsTable).values(
+      batch.map((thought) => ({
+        userId: SEED_USER_ID,
+        content: thought.content,
+        mood: thought.mood,
+        category: thought.category,
+      })),
+    );
+  }
 }
 
 async function bootstrap() {

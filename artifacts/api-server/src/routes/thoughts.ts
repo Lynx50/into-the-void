@@ -24,6 +24,7 @@ const router: IRouter = Router();
 
 const DAILY_RECEIVE_LIMIT = 3;
 const REPORT_HIDE_THRESHOLD = 3;
+const SEED_USER_ID = "__seed__";
 
 type RateLimitRule = {
   windowMs: number;
@@ -118,31 +119,44 @@ async function findReceiveCandidate(
 ) {
   const { notReported, notReportedByUser, notAlreadySeen, notClientSeen } =
     buildEligibleThoughtPredicates(userId, excludedThoughtIds);
+  const selectShape = {
+    id: thoughtsTable.id,
+    content: thoughtsTable.content,
+    mood: thoughtsTable.mood,
+    feltThisCount: thoughtsTable.feltThisCount,
+    madeThinkCount: thoughtsTable.madeThinkCount,
+  };
 
-  const thoughts = await db
-    .select({
-      id: thoughtsTable.id,
-      content: thoughtsTable.content,
-      mood: thoughtsTable.mood,
-      feltThisCount: thoughtsTable.feltThisCount,
-      madeThinkCount: thoughtsTable.madeThinkCount,
-    })
+  const baseConditions = [
+    ne(thoughtsTable.userId, userId),
+    notReported,
+    notReportedByUser,
+    notAlreadySeen,
+    notClientSeen,
+  ] as const;
+
+  const orderByClause =
+    sql`RANDOM() * (${thoughtsTable.feltThisCount} + ${thoughtsTable.madeThinkCount} + 1) DESC`;
+
+  const realThoughts = await db
+    .select(selectShape)
     .from(thoughtsTable)
-    .where(
-      and(
-        ne(thoughtsTable.userId, userId),
-        notReported,
-        notReportedByUser,
-        notAlreadySeen,
-        notClientSeen,
-      ),
-    )
-    .orderBy(
-      sql`RANDOM() * (${thoughtsTable.feltThisCount} + ${thoughtsTable.madeThinkCount} + 1) DESC`,
-    )
+    .where(and(...baseConditions, ne(thoughtsTable.userId, SEED_USER_ID)))
+    .orderBy(orderByClause)
     .limit(1);
 
-  return thoughts[0];
+  if (realThoughts[0]) {
+    return realThoughts[0];
+  }
+
+  const seedThoughts = await db
+    .select(selectShape)
+    .from(thoughtsTable)
+    .where(and(...baseConditions, eq(thoughtsTable.userId, SEED_USER_ID)))
+    .orderBy(orderByClause)
+    .limit(1);
+
+  return seedThoughts[0];
 }
 
 function buildEligibleThoughtPredicates(
