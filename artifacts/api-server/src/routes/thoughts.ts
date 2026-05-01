@@ -116,23 +116,8 @@ async function findReceiveCandidate(
   userId: string,
   excludedThoughtIds: number[],
 ) {
-  const notReported = sql`(
-    SELECT COUNT(*) FROM reactions
-    WHERE reactions.thought_id = ${thoughtsTable.id}
-      AND reactions.reaction_type LIKE 'report%'
-  ) < ${REPORT_HIDE_THRESHOLD}`;
-
-  const notAlreadySeen = sql`${thoughtsTable.id} NOT IN (
-    SELECT thought_id FROM receives WHERE user_id = ${userId}
-  )`;
-
-  const notClientSeen =
-    excludedThoughtIds.length > 0
-      ? sql`${thoughtsTable.id} NOT IN (${sql.join(
-          excludedThoughtIds.map((id) => sql`${id}`),
-          sql`,`,
-        )})`
-      : sql`TRUE`;
+  const { notReported, notReportedByUser, notAlreadySeen, notClientSeen } =
+    buildEligibleThoughtPredicates(userId, excludedThoughtIds);
 
   const thoughts = await db
     .select({
@@ -147,6 +132,7 @@ async function findReceiveCandidate(
       and(
         ne(thoughtsTable.userId, userId),
         notReported,
+        notReportedByUser,
         notAlreadySeen,
         notClientSeen,
       ),
@@ -157,6 +143,42 @@ async function findReceiveCandidate(
     .limit(1);
 
   return thoughts[0];
+}
+
+function buildEligibleThoughtPredicates(
+  userId: string,
+  excludedThoughtIds: number[] = [],
+) {
+  const notReported = sql`(
+    SELECT COUNT(*) FROM reactions
+    WHERE reactions.thought_id = ${thoughtsTable.id}
+      AND reactions.reaction_type LIKE 'report%'
+  ) < ${REPORT_HIDE_THRESHOLD}`;
+
+  const notReportedByUser = sql`${thoughtsTable.id} NOT IN (
+    SELECT thought_id FROM reactions
+    WHERE reactions.user_id = ${userId}
+      AND reactions.reaction_type LIKE 'report%'
+  )`;
+
+  const notAlreadySeen = sql`${thoughtsTable.id} NOT IN (
+    SELECT thought_id FROM receives WHERE user_id = ${userId}
+  )`;
+
+  const notClientSeen =
+    excludedThoughtIds.length > 0
+      ? sql`${thoughtsTable.id} NOT IN (${sql.join(
+          excludedThoughtIds.map((id) => sql`${id}`),
+          sql`,`,
+        )})`
+      : sql`TRUE`;
+
+  return {
+    notReported,
+    notReportedByUser,
+    notAlreadySeen,
+    notClientSeen,
+  };
 }
 
 function pruneRateLimitBuckets(now = Date.now()): void {
@@ -454,6 +476,24 @@ router.post("/thoughts/receive", receiveRateLimit, async (req, res) => {
       return;
     }
 
+    const [existingReceive] = await db
+      .select({ thoughtId: receivesTable.thoughtId })
+      .from(receivesTable)
+      .where(
+        and(
+          eq(receivesTable.userId, userId),
+          eq(receivesTable.thoughtId, thought.id),
+        ),
+      )
+      .limit(1);
+
+    if (existingReceive) {
+      res.status(404).json({
+        error: "No new thoughts right now. Release one and come back later.",
+      });
+      return;
+    }
+
     await db.insert(receivesTable).values({
       userId,
       thoughtId: thought.id,
@@ -615,11 +655,11 @@ router.post("/thoughts/receive-claim", receiveRateLimit, async (req, res) => {
       return;
     }
 
-    const notReported = sql`(
-      SELECT COUNT(*) FROM reactions
-      WHERE reactions.thought_id = ${thoughtsTable.id}
-        AND reactions.reaction_type LIKE 'report%'
-    ) < ${REPORT_HIDE_THRESHOLD}`;
+    const {
+      notReported,
+      notReportedByUser,
+      notAlreadySeen,
+    } = buildEligibleThoughtPredicates(userId);
 
     const [thought] = await db
       .select({
@@ -635,6 +675,8 @@ router.post("/thoughts/receive-claim", receiveRateLimit, async (req, res) => {
           eq(thoughtsTable.id, thoughtId),
           ne(thoughtsTable.userId, userId),
           notReported,
+          notReportedByUser,
+          notAlreadySeen,
         ),
       )
       .limit(1);

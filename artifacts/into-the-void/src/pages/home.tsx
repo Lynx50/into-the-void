@@ -10,6 +10,9 @@ import {
   popPreloadedReceiveThought,
   prewarmOrbitExperience,
   prewarmReceiveExperience,
+  reconcileOrbitThoughtAfterRelease,
+  removeLocalOrbitThought,
+  restorePreloadedReceiveThought,
   saveThoughtToOrbitAfterRelease,
   useClaimReceivedThought,
   useMyThoughts,
@@ -28,6 +31,7 @@ export default function Home() {
   const RELEASE_SUCCESS_MS = 3800;
   const RELEASE_FEEDBACK_MS = 1100;
   const RECEIVE_CALM_WAIT_MS = 1200;
+  const CACHED_RECEIVE_SHOW_DELAY_MS = 420;
 
   const { userId, isReady, isLoading, sessionError, refreshSession } = useUser();
   const { isOnline, checkNetwork } = useNetwork();
@@ -48,6 +52,7 @@ export default function Home() {
     null,
   );
   const [isReceiving, setIsReceiving] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
 
   const previousReactionCountRef = useRef(0);
   const releaseSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -143,7 +148,7 @@ export default function Home() {
       }
 
       receivePendingTimeoutRef.current = setTimeout(() => {
-        setReceivePendingMessage("Listening for a thought...");
+        setReceivePendingMessage("Listening to the void...");
       }, RECEIVE_CALM_WAIT_MS);
 
       return;
@@ -283,6 +288,8 @@ export default function Home() {
 
     const trimmedContent = content.trim();
     const moodToSubmit = selectedMood;
+    const optimisticOrbitId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticCreatedAt = Date.now();
 
     setSubmitError(null);
     setIsReleaseOptimistic(true);
@@ -306,16 +313,27 @@ export default function Home() {
       setIsReleaseOptimistic(false);
     }, RELEASE_FEEDBACK_MS);
 
+    saveThoughtToOrbitAfterRelease({
+      id: optimisticOrbitId,
+      content: trimmedContent,
+      mood: moodToSubmit,
+      feltThisCount: 0,
+      madeThinkCount: 0,
+      localCreatedAt: optimisticCreatedAt,
+      createdAt: new Date(optimisticCreatedAt).toISOString(),
+    });
+
     submitMutation.mutate(
       { data: { userId: userId || undefined, content: trimmedContent, mood: moodToSubmit } },
       {
-        onSuccess: () => {
-          saveThoughtToOrbitAfterRelease({
-            id: `local-${Date.now()}`,
-            content: trimmedContent,
-            mood: moodToSubmit,
-            feltThisCount: 0,
-            madeThinkCount: 0,
+        onSuccess: (data) => {
+          reconcileOrbitThoughtAfterRelease(optimisticOrbitId, {
+            id: data?.id ?? optimisticOrbitId,
+            content: data?.content ?? trimmedContent,
+            mood: data?.mood ?? moodToSubmit,
+            feltThisCount: data?.feltThisCount ?? 0,
+            madeThinkCount: data?.madeThinkCount ?? 0,
+            createdAt: data?.createdAt ?? new Date(optimisticCreatedAt).toISOString(),
           });
           void prewarmReceiveExperience(userId || undefined).catch(() => {
             // Quiet prewarm should not affect release success.
@@ -329,6 +347,7 @@ export default function Home() {
           setIsSuccess(false);
           setContent(trimmedContent);
           setSelectedMood(moodToSubmit);
+          removeLocalOrbitThought(optimisticOrbitId);
 
           if (releaseSuccessTimeoutRef.current) {
             clearTimeout(releaseSuccessTimeoutRef.current);
@@ -372,10 +391,10 @@ export default function Home() {
       void prewarmReceiveExperience(userId || undefined).catch(() => {
         // Quiet retry.
       });
-      setReceiveError("Waking the void. Try again in a moment.");
+      setReceiveError("The void is waking up. Try again in a moment.");
       setTimeout(() => {
         setReceiveError((current) =>
-          current === "Waking the void. Try again in a moment." ? null : current,
+          current === "The void is waking up. Try again in a moment." ? null : current,
         );
       }, 4000);
       return;
@@ -401,10 +420,6 @@ export default function Home() {
 
     const cachedThought = popPreloadedReceiveThought(userId);
     if (cachedThought) {
-      markReceivedThoughtAsShown(userId, cachedThought.id);
-      setReceivedThought(cachedThought);
-      setIsReceiving(false);
-
       claimReceiveMutation.mutate(
         {
           data: {
@@ -413,6 +428,32 @@ export default function Home() {
           },
         },
         {
+          onSuccess: () => {
+            window.setTimeout(() => {
+              markReceivedThoughtAsShown(userId, cachedThought.id);
+              setReceivedThought(cachedThought);
+              setIsReceiving(false);
+            }, CACHED_RECEIVE_SHOW_DELAY_MS);
+          },
+          onError: (err: any) => {
+            if (err?.status === 429) {
+              setReceiveError("You've reached your limit for today.");
+            } else if (err?.status === 401) {
+              setReceiveError("Your session expired. Reconnecting now.");
+              void refreshSession(true);
+              restorePreloadedReceiveThought(userId, cachedThought);
+            } else if (err?.status === 0 || err?.status === 408) {
+              setReceiveError("The void is waking up. Try again in a moment.");
+              restorePreloadedReceiveThought(userId, cachedThought);
+            } else if (err?.status === 409 || err?.status === 404) {
+              setReceiveError("No new thoughts right now. Try again later.");
+            } else {
+              setReceiveError("Couldn't reach the void. Try again.");
+              restorePreloadedReceiveThought(userId, cachedThought);
+            }
+            setIsReceiving(false);
+            setTimeout(() => setReceiveError(null), 4000);
+          },
           onSettled: () => {
             void prewarmReceiveExperience(userId).catch(() => {
               // Quiet refill should not interrupt display.
@@ -435,13 +476,13 @@ export default function Home() {
         },
         onError: (err: any) => {
           if (err?.status === 404) {
-            setReceiveError("No new thoughts right now. Release one and come back later.");
+            setReceiveError("No new thoughts right now. Try again later.");
           } else if (err?.status === 429) {
             setReceiveError("You've reached your limit for today.");
           } else if (err?.status === 403) {
             setReceiveError("Release a thought first to unlock receiving.");
           } else if (err?.status === 408) {
-            setReceiveError("Couldn't reach the void. Try again.");
+            setReceiveError("The void is waking up. Try again in a moment.");
           } else if (err?.status === 401) {
             setReceiveError("Your session expired. Reconnecting now.");
             void refreshSession(true);
@@ -478,16 +519,6 @@ export default function Home() {
         >
           Into the Void
         </h1>
-
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.6, duration: 1.2 }}
-          className="text-xs tracking-[0.22em] text-white/28 mt-3"
-          style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
-        >
-          Let it go... see what's out there.
-        </motion.p>
 
         <AnimatePresence>
           {newReactionMessage && (
@@ -576,20 +607,79 @@ export default function Home() {
         transition={{ duration: 1.1, delay: 0.3, ease: "easeOut" }}
         className="w-full max-w-xl mt-16 z-10"
       >
+        <motion.p
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.9, delay: 0.38, ease: "easeOut" }}
+          className="text-center text-base sm:text-[17px] text-white/75 mt-6 mb-5 tracking-wide"
+          style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
+        >
+          Write what you can't say out loud.
+        </motion.p>
+
         <form onSubmit={handleSubmit} className="relative">
           <div
-            className="rounded-3xl p-6 sm:p-8 transition-all duration-700"
+            className="relative rounded-3xl p-6 sm:p-8 transition-all duration-700 overflow-hidden"
             style={{
-              background: "rgba(255,255,255,0.035)",
-              border: "1px solid rgba(255,255,255,0.065)",
+              background: "rgba(255,255,255,0.09)",
+              border: isInputFocused
+                ? "1px solid rgba(220,205,255,0.48)"
+                : "1px solid rgba(230,210,255,0.35)",
+              boxShadow: isInputFocused
+                ? "0 0 72px rgba(145,105,235,0.42), 0 0 135px rgba(145,105,235,0.24), inset 0 0 46px rgba(255,255,255,0.06)"
+                : "0 0 55px rgba(145,105,235,0.35), 0 0 110px rgba(145,105,235,0.18), inset 0 0 42px rgba(255,255,255,0.05)",
+              backdropFilter: "blur(25px)",
             }}
           >
+            <div
+              className="pointer-events-none absolute inset-0 rounded-[inherit]"
+              style={{
+                background:
+                  "linear-gradient(145deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.04) 18%, rgba(255,255,255,0.015) 42%, rgba(90,58,175,0.08) 100%)",
+              }}
+            />
+
+            <div
+              className="pointer-events-none absolute inset-x-0 top-0 h-24 rounded-t-[inherit]"
+              style={{
+                background:
+                  "linear-gradient(to bottom, rgba(255,255,255,0.25), rgba(255,255,255,0.05), transparent)",
+              }}
+            />
+
+            <div
+              className="pointer-events-none absolute left-[8%] right-[8%] top-[1px] h-px rounded-full"
+              style={{
+                background:
+                  "linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.34) 16%, rgba(242,230,255,0.62) 50%, rgba(255,255,255,0.34) 84%, rgba(255,255,255,0) 100%)",
+                boxShadow: "0 0 16px rgba(232,214,255,0.28)",
+              }}
+            />
+
+            <div
+              className="pointer-events-none absolute -left-8 top-0 h-28 w-40 rounded-full blur-2xl"
+              style={{
+                background:
+                  "radial-gradient(circle, rgba(255,255,255,0.18) 0%, rgba(214,186,255,0.18) 28%, rgba(145,105,235,0.08) 58%, transparent 100%)",
+              }}
+            />
+
+            <div
+              className="pointer-events-none absolute -right-10 top-1 h-24 w-32 rounded-full blur-2xl"
+              style={{
+                background:
+                  "radial-gradient(circle, rgba(255,255,255,0.12) 0%, rgba(214,186,255,0.16) 26%, rgba(145,105,235,0.08) 58%, transparent 100%)",
+              }}
+            />
+
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="Say it... no one knows it's you"
+              onFocus={() => setIsInputFocused(true)}
+              onBlur={() => setIsInputFocused(false)}
+              placeholder="Type your thought here..."
               maxLength={280}
-              className="w-full bg-transparent border-none text-xl sm:text-2xl text-white/85 placeholder:text-white/18 focus:outline-none focus:ring-0 resize-none min-h-[110px] leading-tight"
+              className="relative z-10 w-full bg-transparent border-none text-xl sm:text-2xl text-white/95 placeholder:text-white/70 focus:outline-none focus:ring-0 resize-none min-h-[110px] leading-tight"
               style={{
                 fontFamily: "var(--font-display)",
                 fontStyle: "italic",
@@ -597,10 +687,17 @@ export default function Home() {
               }}
             />
 
+            <p
+              className="relative z-10 mt-3 text-xs sm:text-[13px] text-white/72 tracking-wide"
+              style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
+            >
+              No name. No profile. Just let it go.
+            </p>
+
             <div className="flex justify-between items-center mt-5 pt-5 border-t border-white/[0.05]">
               <div className="flex flex-col gap-2">
                 <p
-                  className="text-[10px] tracking-[0.22em] uppercase text-white/24"
+                  className="text-[10px] tracking-[0.22em] uppercase text-white/58"
                   style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
                 >
                   Optional mood
@@ -624,14 +721,14 @@ export default function Home() {
                       className={cn(
                         "w-8 h-8 rounded-full flex items-center justify-center transition-all duration-400",
                         isSelected
-                          ? "bg-white/10 scale-110"
-                          : "opacity-25 hover:opacity-50 hover:bg-white/5",
+                          ? "bg-white/14 scale-110 shadow-[0_0_16px_rgba(180,140,255,0.28)]"
+                          : "opacity-[0.58] hover:opacity-85 hover:bg-white/10",
                       )}
                     >
                       <Icon
                         className={cn(
                           "w-4 h-4 transition-colors duration-300",
-                          isSelected ? mood.color : "text-white/60",
+                          isSelected ? mood.color : "text-white/78",
                         )}
                       />
                     </button>
@@ -644,11 +741,17 @@ export default function Home() {
                 type="submit"
                 disabled={submitDisabled}
                 className={cn(
-                  "flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-medium tracking-wide transition-all duration-300 active:scale-[0.97]",
+                  "flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold tracking-wide transition-all duration-300 active:scale-[0.97]",
                   !submitDisabled
-                    ? "bg-primary/65 hover:bg-primary/85 text-white cursor-pointer shadow-[0_0_24px_rgba(140,100,255,0.22)]"
-                    : "bg-white/5 text-white/22 cursor-not-allowed",
+                    ? "text-white cursor-pointer shadow-[0_0_25px_rgba(156,107,255,0.6),0_0_50px_rgba(156,107,255,0.3)]"
+                    : "text-white/70 cursor-not-allowed opacity-100",
                 )}
+                style={{
+                  background: submitDisabled
+                    ? "rgba(255,255,255,0.12)"
+                    : "linear-gradient(135deg, #9c6bff, #6f4cff)",
+                  border: "none",
+                }}
               >
                 {submitMutation.isPending
                   ? "Released"
@@ -667,11 +770,11 @@ export default function Home() {
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                transition={{ duration: 0.5 }}
-                className="absolute -bottom-9 left-0 right-0 text-center text-xs tracking-wide text-red-400/70"
-              >
-                {submitError}
-              </motion.p>
+              transition={{ duration: 0.5 }}
+              className="absolute -bottom-9 left-0 right-0 text-center text-xs tracking-wide text-red-300/80"
+            >
+              {submitError}
+            </motion.p>
             ) : isSuccess ? (
               <motion.p
                 key="submit-success"
@@ -679,9 +782,9 @@ export default function Home() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.6 }}
-                className="absolute -bottom-9 left-0 right-0 text-center text-xs tracking-[0.25em] uppercase text-primary/60"
-              >
-                drifting into the void
+              className="absolute -bottom-9 left-0 right-0 text-center text-xs tracking-[0.25em] uppercase text-primary/60"
+            >
+              drifting into the void
               </motion.p>
             ) : null}
           </AnimatePresence>
@@ -702,7 +805,7 @@ export default function Home() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.8 }}
-              className="text-sm text-red-400/60 tracking-wide text-center"
+              className="text-sm text-red-300/80 tracking-wide text-center"
               style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
             >
               You're offline right now.
@@ -714,7 +817,7 @@ export default function Home() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.8 }}
-              className="text-sm text-white/30 tracking-wide"
+              className="text-sm text-white/62 tracking-wide"
               style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
             >
               Someone left this here for you...
@@ -724,7 +827,7 @@ export default function Home() {
               key="limit"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="text-xs text-white/20 tracking-wide"
+              className="text-xs text-white/58 tracking-wide"
             >
               Come back tomorrow for more.
             </motion.p>
@@ -733,9 +836,9 @@ export default function Home() {
               key="gate"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="text-xs text-white/20 tracking-wide text-center max-w-[200px]"
+              className="text-xs text-white/58 tracking-wide text-center max-w-[220px]"
             >
-              Release a thought first to receive one.
+              Release a thought first to unlock Receive.
             </motion.p>
           ) : null}
         </AnimatePresence>
@@ -757,7 +860,7 @@ export default function Home() {
               transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
               style={{
                 background:
-                  "radial-gradient(circle, rgba(160,120,255,0.22) 0%, rgba(160,120,255,0.08) 45%, transparent 72%)",
+                  "radial-gradient(circle, rgba(168,126,255,0.34) 0%, rgba(160,120,255,0.18) 45%, transparent 72%)",
                 transform: "translateZ(0)",
                 backfaceVisibility: "hidden",
                 WebkitBackfaceVisibility: "hidden",
@@ -769,16 +872,16 @@ export default function Home() {
             className="absolute inset-0 rounded-full transition-all duration-500"
             style={{
               background:
-                "radial-gradient(circle at 33% 30%, rgba(200,170,255,0.14) 0%, rgba(120,80,210,0.07) 55%, transparent 100%)",
-              border: "1px solid rgba(200,170,255,0.2)",
+                "radial-gradient(circle at 33% 30%, rgba(224,198,255,0.24) 0%, rgba(152,108,240,0.12) 46%, rgba(80,54,155,0.08) 72%, transparent 100%)",
+              border: "1px solid rgba(200,170,255,0.5)",
               boxShadow: receiveDisabled
                 ? "none"
-                : "0 0 36px rgba(140,100,255,0.18), inset 0 0 24px rgba(200,160,255,0.04)",
+                : "0 0 40px rgba(150,110,255,0.25), inset 0 0 20px rgba(255,255,255,0.05)",
             }}
           />
 
           {!receiveDisabled && (
-            <div className="absolute top-[16%] left-[22%] w-[22%] h-[10%] rounded-full bg-white/18 blur-[3px] rotate-[-30deg]" />
+            <div className="absolute top-[15%] left-[21%] w-[24%] h-[11%] rounded-full bg-white/28 blur-[4px] rotate-[-30deg]" />
           )}
 
           <div className="relative z-10 flex flex-col items-center gap-1">
@@ -795,7 +898,7 @@ export default function Home() {
                   fontSize: "0.8rem",
                   fontWeight: 500,
                   letterSpacing: "0.18em",
-                  color: "rgba(255,255,255,0.72)",
+                  color: "rgba(255,255,255,0.94)",
                 }}
               >
                 RECEIVE
@@ -812,7 +915,7 @@ export default function Home() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="text-xs text-red-400/60 tracking-wide"
+                className="text-xs text-red-300/80 tracking-wide"
               >
                 {receiveError}
               </motion.p>
@@ -822,7 +925,7 @@ export default function Home() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="text-xs text-white/28 tracking-wide"
+                className="text-xs text-white/58 tracking-wide"
                 style={{ fontFamily: "var(--font-display)", fontStyle: "italic" }}
               >
                 {receivePendingMessage}
@@ -832,7 +935,7 @@ export default function Home() {
                 key="count"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="text-[10px] tracking-[0.22em] text-white/18 uppercase"
+                className="text-[10px] tracking-[0.22em] text-white/52 uppercase"
               >
                 {remainingReceives} / {receiveLimit} receives remaining today
               </motion.p>

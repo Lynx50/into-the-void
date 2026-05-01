@@ -8,7 +8,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AnimatedBackground from "@/components/animated-background";
 import { Navigation } from "@/components/navigation";
-import { prewarmOrbitExperience } from "@/hooks/use-thoughts";
+import { prewarmOrbitExperience, prewarmReceiveExperience } from "@/hooks/use-thoughts";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import Orbit from "@/pages/orbit";
@@ -230,7 +230,10 @@ function AppShell() {
 function App() {
   useEffect(() => {
     trackEvent("app_open");
-    void prewarmOrbitExperience().catch(() => {
+    void Promise.allSettled([
+      prewarmOrbitExperience(),
+      prewarmReceiveExperience(),
+    ]).catch(() => {
       // Quiet warm-up should never affect first render.
     });
   }, []);

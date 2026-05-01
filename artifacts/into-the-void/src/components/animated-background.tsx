@@ -19,8 +19,6 @@ function random(min: number, max: number) {
 
 function createBubbles(): BubbleConfig[] {
   const bubbleCount = 6;
-
-  // Roughly 1 in 5 loads
   const bigBubbleIndex = Math.random() < 0.2
     ? Math.floor(Math.random() * bubbleCount)
     : -1;
@@ -36,8 +34,8 @@ function createBubbles(): BubbleConfig[] {
       delay: random(0, 3),
       driftX: isBigBubble ? random(-12, 12) : random(-16, 16),
       driftY: isBigBubble ? random(-12, 12) : random(-16, 16),
-      opacity: isBigBubble ? random(0.075, 0.1) : random(0.065, 0.09),
-      borderOpacity: isBigBubble ? random(0.09, 0.12) : random(0.075, 0.11),
+      opacity: isBigBubble ? random(0.085, 0.11) : random(0.075, 0.1),
+      borderOpacity: isBigBubble ? random(0.11, 0.15) : random(0.09, 0.13),
     };
   });
 }
@@ -51,7 +49,23 @@ function AnimatedBackground() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(ellipse at top, rgba(38,22,88,0.22) 0%, rgba(10,8,22,0.08) 42%, rgba(4,3,10,0) 72%)",
+            "radial-gradient(circle at 50% 15%, #1c2145 0%, #111531 45%, #060812 100%)",
+        }}
+      />
+
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(circle at 50% 34%, rgba(145,105,235,0.25) 0%, rgba(110,86,210,0.15) 30%, rgba(0,0,0,0) 64%)",
+        }}
+      />
+
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(circle at 50% 23%, rgba(245,236,255,0.06) 0%, rgba(180,140,255,0.05) 14%, rgba(0,0,0,0) 42%)",
         }}
       />
 
@@ -78,10 +92,10 @@ function AnimatedBackground() {
             height: bubble.size,
             opacity: bubble.opacity,
             background:
-              "radial-gradient(circle at 32% 28%, rgba(190,160,255,0.18) 0%, rgba(120,88,220,0.10) 42%, rgba(75,52,150,0.05) 70%, rgba(25,18,55,0.015) 100%)",
+              "radial-gradient(circle at 32% 28%, rgba(200,175,255,0.20) 0%, rgba(128,96,228,0.12) 42%, rgba(78,55,155,0.06) 70%, rgba(25,18,55,0.02) 100%)",
             border: `1px solid rgba(190,160,255,${bubble.borderOpacity})`,
             boxShadow:
-              "inset 0 1px 0 rgba(255,255,255,0.03), 0 0 18px rgba(90,60,180,0.03)",
+              "inset 0 1px 0 rgba(255,255,255,0.04), 0 0 22px rgba(95,70,185,0.05)",
             transform: "translateZ(0)",
             willChange: "transform",
             backfaceVisibility: "hidden",
@@ -97,7 +111,7 @@ function AnimatedBackground() {
               left: "16%",
               borderRadius: "50%",
               background:
-                "radial-gradient(ellipse, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.05) 55%, transparent 100%)",
+                "radial-gradient(ellipse, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 55%, transparent 100%)",
               transform: "rotate(-28deg)",
             }}
           />

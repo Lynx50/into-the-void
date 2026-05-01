@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useMemo, useState } from "react";
 import {
+  getOrbitLocalDebugCounts,
   type OrbitThoughtSnapshot,
   getImmediateLocalOrbitThoughts,
   useMyThoughts,
@@ -8,9 +8,10 @@ import {
 } from "@/hooks/use-thoughts";
 import { triggerHaptic } from "@/lib/haptics";
 
-const MAX_VISIBLE_ORBIT_THOUGHTS = 32;
-const PRIORITY_RECENT_THOUGHTS = 20;
+const MAX_VISIBLE_ORBIT_THOUGHTS = 38;
+const PRIORITY_RECENT_THOUGHTS = 22;
 const ORBIT_FALLBACK_TIMEOUT_MS = 1500;
+const ORBIT_DEBUG = import.meta.env.DEV;
 
 type OrbitThought = {
   id: number | string;
@@ -22,11 +23,17 @@ type OrbitThought = {
   top: number;
   left: number;
   opacity: number;
+  edgeOpacity: number;
   blur: number;
   zIndex: number;
   brightness: number;
+  depth: number;
+  auraOpacity: number;
+  pulseDuration: number;
+  pulseScale: number;
   driftX: number;
   driftY: number;
+  driftRotate: number;
   driftDuration: number;
   glow: string;
   border: string;
@@ -75,7 +82,8 @@ function mergeOrbitThoughts(
     const exists = merged.some((serverThought) => {
       return (
         String(serverThought.id) === String(localThought.id) ||
-        ((serverThought.content ?? "").trim() === (localThought.content ?? "").trim() &&
+        ((serverThought.content ?? "").trim() ===
+          (localThought.content ?? "").trim() &&
           (serverThought.mood ?? null) === (localThought.mood ?? null))
       );
     });
@@ -88,7 +96,55 @@ function mergeOrbitThoughts(
   return merged;
 }
 
-function selectVisibleThoughts(thoughts: any[]): any[] {
+function getThoughtTime(thought: OrbitThoughtSnapshot): number {
+  if (
+    typeof (thought as { localCreatedAt?: number }).localCreatedAt === "number" &&
+    Number.isFinite((thought as { localCreatedAt?: number }).localCreatedAt)
+  ) {
+    return (thought as { localCreatedAt?: number }).localCreatedAt as number;
+  }
+
+  if (typeof (thought as { createdAt?: string | null }).createdAt === "string") {
+    const parsed = new Date(
+      (thought as { createdAt?: string | null }).createdAt as string,
+    ).getTime();
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  const numericId = Number(thought.id);
+  return Number.isFinite(numericId) ? numericId : hashSeed(String(thought.id));
+}
+
+function sortOrbitThoughts(thoughts: OrbitThoughtSnapshot[]): OrbitThoughtSnapshot[] {
+  return [...thoughts].sort((a, b) => {
+    const timeDiff = getThoughtTime(b) - getThoughtTime(a);
+    if (timeDiff !== 0) {
+      return timeDiff;
+    }
+
+    return String(b.id).localeCompare(String(a.id));
+  });
+}
+
+function buildThoughtIdentityKey(thoughts: OrbitThoughtSnapshot[]): string {
+  return thoughts
+    .map((thought) => {
+      const createdAt =
+        typeof (thought as { createdAt?: string | null }).createdAt === "string"
+          ? ((thought as { createdAt?: string | null }).createdAt as string)
+          : "";
+      const localCreatedAt =
+        typeof (thought as { localCreatedAt?: number }).localCreatedAt === "number"
+          ? String((thought as { localCreatedAt?: number }).localCreatedAt)
+          : "";
+      return `${String(thought.id)}:${createdAt}:${localCreatedAt}`;
+    })
+    .join("|");
+}
+
+function selectVisibleThoughts(thoughts: OrbitThoughtSnapshot[]): OrbitThoughtSnapshot[] {
   if (thoughts.length <= MAX_VISIBLE_ORBIT_THOUGHTS) {
     return thoughts;
   }
@@ -105,17 +161,58 @@ function selectVisibleThoughts(thoughts: any[]): any[] {
   }
 
   const sampledOlderThoughts = Array.from({ length: remainingSlots }, (_, index) => {
-    const position = Math.floor(((index + 0.4) / remainingSlots) * olderThoughts.length);
+    const position = Math.floor(
+      ((index + 0.45) / remainingSlots) * olderThoughts.length,
+    );
     return olderThoughts[Math.min(position, olderThoughts.length - 1)];
-  }).filter(Boolean);
+  }).filter(Boolean) as OrbitThoughtSnapshot[];
 
   return [...recentThoughts, ...sampledOlderThoughts];
 }
 
-function buildPositionedThoughts(thoughts: any[]): OrbitThought[] {
-  const visibleThoughts = selectVisibleThoughts(thoughts);
+const LOW_COUNT_LAYOUTS: Record<number, Array<{ top: number; left: number }>> = {
+  1: [{ top: 48, left: 50 }],
+  2: [
+    { top: 44, left: 34 },
+    { top: 56, left: 66 },
+  ],
+  3: [
+    { top: 41, left: 50 },
+    { top: 58, left: 33 },
+    { top: 58, left: 67 },
+  ],
+  4: [
+    { top: 38, left: 34 },
+    { top: 39, left: 66 },
+    { top: 61, left: 36 },
+    { top: 60, left: 68 },
+  ],
+  5: [
+    { top: 36, left: 50 },
+    { top: 47, left: 30 },
+    { top: 48, left: 70 },
+    { top: 65, left: 38 },
+    { top: 64, left: 63 },
+  ],
+  6: [
+    { top: 35, left: 39 },
+    { top: 35, left: 61 },
+    { top: 49, left: 28 },
+    { top: 49, left: 72 },
+    { top: 65, left: 40 },
+    { top: 65, left: 60 },
+  ],
+};
 
-  return visibleThoughts.map((thought: any, index: number) => {
+function getStableBubbleLayout(thoughts: OrbitThoughtSnapshot[]): OrbitThought[] {
+  const visibleThoughts = selectVisibleThoughts(thoughts);
+  const densityFactor = clamp(
+    visibleThoughts.length / MAX_VISIBLE_ORBIT_THOUGHTS,
+    0,
+    1,
+  );
+
+  return visibleThoughts.map((thought, index) => {
     const feltThisCount =
       typeof thought?.feltThisCount === "number" ? thought.feltThisCount : 0;
     const madeThinkCount =
@@ -124,24 +221,55 @@ function buildPositionedThoughts(thoughts: any[]): OrbitThought[] {
     const id = thought?.id ?? `thought-${index}`;
     const recencyRatio =
       visibleThoughts.length <= 1 ? 0 : index / (visibleThoughts.length - 1);
+    const depth = 1 - recencyRatio;
     const random = createRandom(hashSeed(String(id)));
+    const lowCountLayout =
+      visibleThoughts.length <= 6
+        ? LOW_COUNT_LAYOUTS[visibleThoughts.length]?.[index]
+        : null;
     const angle = random() * Math.PI * 2;
-    const baseRadius = 10 + random() * 24 + recencyRatio * 20;
-    const jitterX = (random() - 0.5) * 18;
-    const jitterY = (random() - 0.5) * 20;
-    const centerX = 50 + (random() - 0.5) * 8;
-    const centerY = 48 + (random() - 0.5) * 10;
-    const left = clamp(centerX + Math.cos(angle) * baseRadius + jitterX, 10, 90);
-    const top = clamp(centerY + Math.sin(angle) * (baseRadius * 0.9) + jitterY, 10, 88);
-    const size =
-      clamp(146 - recencyRatio * 74 + getReactionBoost(feltThisCount, madeThinkCount), 60, 164);
-    const opacity = clamp(0.97 - recencyRatio * 0.5, 0.34, 0.97);
-    const blur = clamp(recencyRatio * 1.9, 0, 1.9);
-    const brightness = clamp(1.08 - recencyRatio * 0.26, 0.72, 1.08);
+    const baseRadius =
+      4 +
+      random() * 14 +
+      recencyRatio * (28 + densityFactor * 10) +
+      (1 - depth) * 6;
+    const crowdingFactor = 8 + densityFactor * 10;
+    const jitterX = (random() - 0.5) * (14 + crowdingFactor);
+    const jitterY = (random() - 0.5) * (16 + crowdingFactor);
+    const centerX = 50 + (random() - 0.5) * 10;
+    const centerY = 49 + (random() - 0.5) * 12;
+    const left = clamp(
+      lowCountLayout
+        ? lowCountLayout.left + (random() - 0.5) * 2.5
+        : centerX + Math.cos(angle) * baseRadius + jitterX,
+      12,
+      88,
+    );
+    const top = clamp(
+      lowCountLayout
+        ? lowCountLayout.top + (random() - 0.5) * 2.2
+        : centerY + Math.sin(angle) * (baseRadius * 0.9) + jitterY,
+      12,
+      86,
+    );
+    const size = clamp(
+      62 + depth * 92 + getReactionBoost(feltThisCount, madeThinkCount) + random() * 16,
+      60,
+      176,
+    );
+    const edgeDistanceX = Math.abs(left - 50) / 40;
+    const edgeDistanceY = Math.abs(top - 50) / 38;
+    const edgeFade = clamp(Math.max(edgeDistanceX, edgeDistanceY), 0, 1);
+    const edgeOpacity = clamp(1 - edgeFade * 0.35, 0.62, 1);
+    const opacity = clamp((0.68 + depth * 0.28) * edgeOpacity, 0.65, 1);
+    const blur = clamp((1 - depth) * 1.8, 0, 2.1);
+    const brightness = clamp(0.82 + depth * 0.28, 0.82, 1.12);
     const zIndex = visibleThoughts.length - index;
-    const driftX = (random() - 0.5) * 14;
-    const driftY = (random() - 0.5) * 16;
-    const driftDuration = 8 + random() * 8 + recencyRatio * 3;
+    const auraOpacity = clamp(
+      0.12 + depth * 0.16 + totalReactions * 0.012,
+      0.12,
+      0.32,
+    );
 
     return {
       id,
@@ -156,76 +284,100 @@ function buildPositionedThoughts(thoughts: any[]): OrbitThought[] {
       top,
       left,
       opacity,
+      edgeOpacity,
       blur,
       zIndex,
       brightness,
-      driftX,
-      driftY,
-      driftDuration,
+      depth,
+      auraOpacity,
+      pulseDuration: 0,
+      pulseScale: 1,
+      driftX: 0,
+      driftY: 0,
+      driftRotate: 0,
+      driftDuration: 0,
       glow:
         totalReactions > 0
-          ? "0 0 34px rgba(195,160,255,0.18), inset 0 0 18px rgba(220,180,255,0.07)"
-          : recencyRatio < 0.35
-            ? "0 0 26px rgba(155,120,255,0.16), inset 0 0 14px rgba(200,160,255,0.05)"
-            : "0 0 18px rgba(120,90,220,0.08), inset 0 0 12px rgba(160,130,220,0.03)",
+          ? "0 0 30px rgba(170,110,255,0.28), 0 0 70px rgba(120,80,220,0.16), inset 0 0 28px rgba(255,255,255,0.10), inset -6px -10px 20px rgba(0,0,0,0.25)"
+          : depth > 0.55
+            ? "0 0 30px rgba(170,110,255,0.28), 0 0 70px rgba(120,80,220,0.16), inset 0 0 28px rgba(255,255,255,0.10), inset -6px -10px 20px rgba(0,0,0,0.25)"
+            : "0 0 22px rgba(140,96,220,0.18), 0 0 48px rgba(92,62,170,0.10), inset 0 0 22px rgba(255,255,255,0.08), inset -6px -10px 18px rgba(0,0,0,0.20)",
       border:
         totalReactions > 0
-          ? "1px solid rgba(230,200,255,0.24)"
-          : recencyRatio < 0.35
-            ? "1px solid rgba(210,180,255,0.20)"
-            : "1px solid rgba(170,145,230,0.12)",
+          ? "1px solid rgba(220,200,255,0.28)"
+          : depth > 0.55
+            ? "1px solid rgba(220,200,255,0.28)"
+            : "1px solid rgba(200,180,240,0.20)",
       highlight:
         totalReactions > 0
-          ? "radial-gradient(ellipse, rgba(255,255,255,0.68) 0%, rgba(255,255,255,0.18) 55%, transparent 100%)"
-          : recencyRatio < 0.35
-            ? "radial-gradient(ellipse, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.16) 55%, transparent 100%)"
-            : "radial-gradient(ellipse, rgba(255,255,255,0.46) 0%, rgba(255,255,255,0.11) 55%, transparent 100%)",
+          ? "radial-gradient(ellipse, rgba(255,255,255,0.74) 0%, rgba(255,255,255,0.22) 52%, transparent 100%)"
+          : depth > 0.55
+            ? "radial-gradient(ellipse, rgba(255,255,255,0.70) 0%, rgba(255,255,255,0.20) 52%, transparent 100%)"
+            : "radial-gradient(ellipse, rgba(255,255,255,0.60) 0%, rgba(255,255,255,0.14) 52%, transparent 100%)",
     };
   });
 }
 
 export default function Orbit() {
   const [selectedThought, setSelectedThought] = useState<OrbitThought | null>(null);
-  const [newlyArrivedIds, setNewlyArrivedIds] = useState<(number | string)[]>([]);
   const [localOrbitThoughts, setLocalOrbitThoughts] = useState<OrbitThoughtSnapshot[]>(
     () => getImmediateLocalOrbitThoughts(),
   );
   const [showLoadingMessage, setShowLoadingMessage] = useState(
     () => getImmediateLocalOrbitThoughts().length === 0,
   );
-  const previousIdsRef = useRef<(number | string)[]>([]);
-  const { isLoading: isSessionLoading, sessionError, refreshSession } = useUser();
-  const { data, isError, isFetched } = useMyThoughts();
+  const [tappedThoughtId, setTappedThoughtId] = useState<number | string | null>(null);
+  const { sessionError, refreshSession } = useUser();
+  const { data, isError, isFetched } = useMyThoughts({
+    refetchInterval: false,
+    refetchOnMount: true,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: true,
+    staleTime: 60000,
+  });
 
   useEffect(() => {
     const nextLocalThoughts = getImmediateLocalOrbitThoughts();
     setLocalOrbitThoughts(nextLocalThoughts);
-    console.log("Orbit local count:", nextLocalThoughts.length);
-    if (nextLocalThoughts.length > 0) {
-      console.log("Orbit rendered from local");
+    if (ORBIT_DEBUG) {
+      const debugCounts = getOrbitLocalDebugCounts();
+      console.log("Orbit local raw count:", debugCounts.rawCount);
+      console.log("Orbit visible local count:", debugCounts.visibleCount);
+      if (nextLocalThoughts.length > 0) {
+        console.log("Orbit rendered from local");
+      }
     }
   }, []);
 
   const serverThoughts = useMemo(
-    () => (Array.isArray(data) ? (data as OrbitThoughtSnapshot[]) : []),
+    () => sortOrbitThoughts(Array.isArray(data) ? (data as OrbitThoughtSnapshot[]) : []),
     [data],
   );
-  const safeThoughtsArray = useMemo(
-    () => mergeOrbitThoughts(serverThoughts, localOrbitThoughts),
+  const mergedThoughts = useMemo(
+    () => sortOrbitThoughts(mergeOrbitThoughts(serverThoughts, localOrbitThoughts)),
     [localOrbitThoughts, serverThoughts],
   );
-  const hasVisibleThoughts = safeThoughtsArray.length > 0;
+  const thoughtIdentityKey = useMemo(
+    () => buildThoughtIdentityKey(mergedThoughts),
+    [mergedThoughts],
+  );
+  const hasVisibleThoughts = mergedThoughts.length > 0;
   const serverSettled = isFetched || isError;
   const shouldShowLoading = !hasVisibleThoughts && showLoadingMessage && !serverSettled;
 
   const stableThoughts = useMemo(
-    () => buildPositionedThoughts(safeThoughtsArray),
-    [safeThoughtsArray],
+    () => getStableBubbleLayout(mergedThoughts),
+    [thoughtIdentityKey],
   );
 
   useEffect(() => {
-    console.log("Orbit server count:", serverThoughts.length);
-  }, [serverThoughts.length]);
+    if (ORBIT_DEBUG) {
+      console.log("Orbit server count:", serverThoughts.length);
+      console.log("Orbit merged count:", mergedThoughts.length);
+      console.log("Orbit rendered real bubbles count:", stableThoughts.length);
+      console.log("Orbit phantom bubbles count:", 0);
+    }
+  }, [mergedThoughts.length, serverThoughts.length, stableThoughts.length]);
 
   useEffect(() => {
     if (hasVisibleThoughts) {
@@ -240,7 +392,9 @@ export default function Orbit() {
 
     const timeout = setTimeout(() => {
       setShowLoadingMessage(false);
-      console.log("Orbit fallback triggered");
+      if (ORBIT_DEBUG) {
+        console.log("Orbit fallback triggered");
+      }
     }, ORBIT_FALLBACK_TIMEOUT_MS);
 
     return () => {
@@ -249,42 +403,35 @@ export default function Orbit() {
   }, [hasVisibleThoughts, serverSettled]);
 
   useEffect(() => {
-    const nextIds = stableThoughts.map((thought) => thought.id);
-    const previousIds = previousIdsRef.current;
-
-    const addedIds = nextIds.filter((id) => !previousIds.includes(id));
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-
-    if (previousIds.length > 0 && addedIds.length > 0) {
-      setNewlyArrivedIds(addedIds);
-      void triggerHaptic("light");
-
-      timeout = setTimeout(() => {
-        setNewlyArrivedIds([]);
-      }, 1100);
-    } else {
-      setNewlyArrivedIds([]);
+    if (!ORBIT_DEBUG) {
+      return;
     }
 
-    previousIdsRef.current = nextIds;
-
-    return () => {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-    };
-  }, [stableThoughts]);
+    console.log(
+      "Orbit state:",
+      shouldShowLoading
+        ? "loading"
+        : hasVisibleThoughts
+          ? "showing-thoughts"
+          : "empty",
+    );
+  }, [hasVisibleThoughts, shouldShowLoading]);
 
   const handleOpenThought = (thought: OrbitThought) => {
     void triggerHaptic("light");
+    setTappedThoughtId(thought.id);
     setSelectedThought(thought);
+
+    window.setTimeout(() => {
+      setTappedThoughtId((current) => (current === thought.id ? null : current));
+    }, 260);
   };
 
   return (
     <div className="min-h-screen p-4 sm:p-6 pb-36 overflow-hidden relative">
       <div className="pt-8 text-center">
         <h1
-          className="text-4xl md:text-5xl text-white/88"
+          className="text-4xl md:text-5xl text-white/90"
           style={{
             fontFamily: "var(--font-display)",
             fontStyle: "italic",
@@ -296,7 +443,7 @@ export default function Orbit() {
         </h1>
 
         <p
-          className="text-xs tracking-[0.22em] text-white/28 mt-3"
+          className="text-xs tracking-[0.22em] text-white/50 mt-3"
           style={{
             fontFamily: "var(--font-display)",
             fontStyle: "italic",
@@ -327,9 +474,20 @@ export default function Orbit() {
       </div>
 
       <div className="relative h-[72vh] mt-6 overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none">
+          <div
+            className="absolute inset-[-18%]"
+            style={{
+              background:
+                "radial-gradient(circle at 50% 18%, rgba(170,135,255,0.10) 0%, rgba(112,82,198,0.08) 18%, rgba(58,40,112,0.05) 34%, rgba(16,10,40,0) 72%)",
+              filter: "blur(30px)",
+            }}
+          />
+        </div>
+
         {shouldShowLoading && (
           <p
-            className="text-center text-white/30 mt-16"
+            className="text-center text-white/56 mt-16"
             style={{
               fontFamily: "var(--font-display)",
               fontStyle: "italic",
@@ -340,7 +498,7 @@ export default function Orbit() {
         )}
 
         {!hasVisibleThoughts && !shouldShowLoading && (
-          <div className="text-center text-white/30 mt-20 px-6">
+          <div className="text-center text-white/56 mt-20 px-6">
             <p
               className="text-lg"
               style={{
@@ -350,10 +508,10 @@ export default function Orbit() {
             >
               No thoughts in orbit yet.
             </p>
-            <p className="text-sm text-white/20 mt-3">
+            <p className="text-sm text-white/56 mt-3">
               {isError
                 ? "Orbit will refresh quietly when the connection returns."
-                : "Release your first thought into the void and it will appear here."}
+                : "Release one into the void first."}
             </p>
           </div>
         )}
@@ -362,10 +520,10 @@ export default function Orbit() {
           stableThoughts.map((thought) => {
             const totalReactions =
               (thought.feltThisCount ?? 0) + (thought.madeThinkCount ?? 0);
-            const isNew = newlyArrivedIds.includes(thought.id);
+            const isTapped = tappedThoughtId === thought.id;
 
             return (
-              <motion.div
+              <div
                 key={thought.id}
                 className="absolute"
                 style={{
@@ -373,47 +531,46 @@ export default function Orbit() {
                   left: `${thought.left}%`,
                   width: `${thought.size}px`,
                   height: `${thought.size}px`,
-                  zIndex: thought.zIndex,
+                  zIndex: thought.zIndex + 10,
                   opacity: thought.opacity,
                   filter: `blur(${thought.blur}px) brightness(${thought.brightness})`,
                   transform: "translate(-50%, -50%)",
                 }}
-                initial={isNew ? { opacity: 0, scale: 0.78 } : false}
-                animate={{
-                  opacity: thought.opacity,
-                  scale: isNew ? [0.78, 1.06, 1] : 1,
-                  x: [0, thought.driftX, 0],
-                  y: [0, thought.driftY, 0],
-                }}
-                transition={{
-                  opacity: { duration: 0.6 },
-                  scale: { duration: isNew ? 0.9 : 0.3, ease: "easeOut" },
-                  x: {
-                    duration: thought.driftDuration,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  },
-                  y: {
-                    duration: thought.driftDuration + 1.8,
-                    repeat: Infinity,
-                    ease: "easeInOut",
-                  },
-                }}
               >
                 <button
                   onClick={() => handleOpenThought(thought)}
-                  className="w-full h-full rounded-full cursor-pointer active:scale-95 transition-transform duration-200"
+                  className="w-full h-full rounded-full cursor-pointer active:scale-95 transition-transform duration-200 relative"
                   style={{
+                    opacity: thought.edgeOpacity,
+                    transform: isTapped ? "scale(1.06)" : "scale(1)",
+                    transition: "transform 180ms ease, box-shadow 180ms ease",
                     background:
-                      totalReactions > 0
-                        ? "radial-gradient(circle at 33% 30%, rgba(235,205,255,0.18) 0%, rgba(145,105,235,0.11) 52%, rgba(255,255,255,0.03) 100%)"
-                        : thought.zIndex > stableThoughts.length * 0.65
-                          ? "radial-gradient(circle at 33% 30%, rgba(210,180,255,0.16) 0%, rgba(130,90,220,0.08) 55%, rgba(255,255,255,0.03) 100%)"
-                          : "radial-gradient(circle at 33% 30%, rgba(150,120,220,0.10) 0%, rgba(75,50,135,0.06) 55%, rgba(255,255,255,0.02) 100%)",
+                      "radial-gradient(circle at 30% 25%, rgba(255,255,255,0.38), transparent 14%), radial-gradient(circle at 50% 50%, rgba(170,120,255,0.30), rgba(50,35,95,0.38) 65%, rgba(15,12,35,0.5))",
                     border: thought.border,
-                    boxShadow: thought.glow,
+                    boxShadow: isTapped
+                      ? `${thought.glow}, 0 0 88px rgba(185,136,255,0.18)`
+                      : thought.glow,
                   }}
                 >
+                  <div
+                    className="absolute inset-[-10%] rounded-full pointer-events-none"
+                    style={{
+                      opacity: isTapped ? thought.auraOpacity : thought.auraOpacity * 0.8,
+                      background:
+                        "radial-gradient(circle, rgba(180,145,255,0.18) 0%, rgba(130,96,225,0.08) 44%, rgba(0,0,0,0) 72%)",
+                      filter: "blur(14px)",
+                      transition: "opacity 180ms ease",
+                    }}
+                  />
+
+                  <div
+                    className="absolute inset-[14%] rounded-full pointer-events-none"
+                    style={{
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      opacity: 0.45,
+                    }}
+                  />
+
                   <div className="absolute inset-0 rounded-full pointer-events-none">
                     <div
                       className="absolute"
@@ -438,13 +595,13 @@ export default function Orbit() {
                         background:
                           totalReactions > 0
                             ? "rgba(255,255,255,0.58)"
-                            : "rgba(255,255,255,0.44)",
+                            : "rgba(255,255,255,0.52)",
                         transform: "rotate(-30deg)",
                       }}
                     />
                   </div>
                 </button>
-              </motion.div>
+              </div>
             );
           })}
       </div>
@@ -459,12 +616,14 @@ export default function Orbit() {
             onClick={(e) => e.stopPropagation()}
             style={{
               background: "rgba(255,255,255,0.035)",
-              border: "1px solid rgba(255,255,255,0.065)",
+              border: "1px solid rgba(220,205,255,0.12)",
               backdropFilter: "blur(16px)",
+              boxShadow:
+                "0 0 34px rgba(145,105,235,0.12), inset 0 0 24px rgba(255,255,255,0.02)",
             }}
           >
             <h2
-              className="text-2xl text-white/88 mb-4"
+              className="text-2xl text-white/92 mb-4"
               style={{
                 fontFamily: "var(--font-display)",
                 fontStyle: "italic",
@@ -474,13 +633,13 @@ export default function Orbit() {
             </h2>
 
             {selectedThought.mood && (
-              <p className="text-sm text-white/40 mb-4 uppercase tracking-[0.2em]">
+              <p className="text-sm text-white/60 mb-4 uppercase tracking-[0.2em]">
                 {selectedThought.mood}
               </p>
             )}
 
             <p
-              className="text-lg text-white/75 leading-relaxed"
+              className="text-lg text-white/86 leading-relaxed"
               style={{
                 fontFamily: "var(--font-display)",
                 fontStyle: "italic",
@@ -489,16 +648,16 @@ export default function Orbit() {
               {selectedThought.content ?? "Untitled thought"}
             </p>
 
-            <div className="mt-6 text-sm text-white/35">
+            <div className="mt-6 text-sm text-white/60">
               Felt this: {selectedThought.feltThisCount ?? 0} · Made think:{" "}
               {selectedThought.madeThinkCount ?? 0}
             </div>
 
             <button
-              className="mt-6 px-5 py-2.5 rounded-full text-sm tracking-wide text-white/75 transition-all duration-300 hover:bg-white/10"
+              className="mt-6 px-5 py-2.5 rounded-full text-sm tracking-wide text-white/88 transition-all duration-300 hover:bg-white/12"
               style={{
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.08)",
+                background: "rgba(255,255,255,0.08)",
+                border: "1px solid rgba(220,205,255,0.14)",
               }}
               onClick={() => setSelectedThought(null)}
             >

@@ -1003,6 +1003,22 @@ export const seedThoughts: ReceivedThought[] = [
   { id: 11000, content: "Maybe some answers only appear after I stop demanding them in ways that make me kinder and more confused.", mood: null, feltThisCount: 0, madeThinkCount: 0 },
 ];
 
-export function getRandomSeedThought(): ReceivedThought {
-  return seedThoughts[Math.floor(Math.random() * seedThoughts.length)];
+export function getRandomSeedThought(
+  excludedIds: Array<number | string> = [],
+): ReceivedThought | null {
+  const excluded = new Set(
+    excludedIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0),
+  );
+
+  const availableThoughts = seedThoughts.filter(
+    (thought) => !excluded.has(Number(thought.id)),
+  );
+
+  if (availableThoughts.length === 0) {
+    return null;
+  }
+
+  return availableThoughts[Math.floor(Math.random() * availableThoughts.length)];
 }

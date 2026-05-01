@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MOODS } from "@/components/mood-icon";
+import { APP_VERSION } from "@/lib/app-version";
 import {
   getHapticsEnabled,
   setHapticsEnabled,
@@ -171,6 +172,10 @@ export default function Info() {
             </div>
           </section>
         </div>
+
+        <p className="mt-6 text-center text-[11px] text-white/32 tracking-wide">
+          Into the Void v{APP_VERSION}
+        </p>
       </div>
     </div>
   );

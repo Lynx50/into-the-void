@@ -1,4 +1,5 @@
 const API_TIMEOUT_MS = 65000;
+const BACKEND_WARM_TIMEOUT_MS = 30000;
 const USER_ID_KEY = "void_user_id";
 const SESSION_TOKEN_KEY = "void_session_token";
 const SESSION_HEADER = "x-void-session";
@@ -226,4 +227,12 @@ export async function initializeAnonymousSession(
   }
 
   return sessionInitializationPromise;
+}
+
+export async function warmBackendConnection(): Promise<void> {
+  await apiFetch<{ status: string }>(
+    "/healthz",
+    undefined,
+    { skipSession: true, timeoutMs: BACKEND_WARM_TIMEOUT_MS },
+  );
 }

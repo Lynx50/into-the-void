@@ -1,17 +1,38 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { trackEvent } from "@/lib/analytics";
-import { apiFetch, initializeAnonymousSession } from "@/lib/api";
+import {
+  apiFetch,
+  initializeAnonymousSession,
+  warmBackendConnection,
+} from "@/lib/api";
 import { useUser } from "./use-user";
 
 export { useUser };
 
-const LOCAL_ORBIT_THOUGHTS_KEY = "void_local_orbit_thoughts_v4";
+const LOCAL_ORBIT_THOUGHTS_KEY = "void_local_orbit_thoughts_v5";
+const LEGACY_LOCAL_ORBIT_THOUGHTS_KEYS = [
+  "void_local_orbit_thoughts_v4",
+  "void_local_orbit_thoughts_v3",
+  "void_local_orbit_thoughts_v2",
+  "void_local_orbit_thoughts_v1",
+  "void_local_orbit_thoughts",
+] as const;
 const RECEIVE_COUNT_CACHE_KEY = "void_receive_count_cache_v1";
-const SEEN_RECEIVED_THOUGHT_IDS_KEY = "void_seen_received_thought_ids_v1";
+const SEEN_RECEIVED_THOUGHT_IDS_KEY = "void_seen_received_thought_ids";
+const GLOBAL_SEEN_RECEIVED_THOUGHT_IDS_KEY =
+  "void_seen_received_thought_ids_global";
+const LEGACY_SEEN_RECEIVED_THOUGHT_IDS_KEYS = [
+  "void_seen_received_thought_ids_v1",
+] as const;
+const LEGACY_GLOBAL_SEEN_RECEIVED_THOUGHT_IDS_KEYS = [
+  "void_seen_received_thought_ids_global_v1",
+] as const;
+const PRELOADED_RECEIVE_THOUGHTS_CACHE_KEY = "void_preloaded_receive_thoughts_v1";
 const ORBIT_APPEAR_DELAY_MS = 5000;
 const MAX_SEEN_THOUGHT_IDS = 500;
 const MAX_PRELOADED_RECEIVE_THOUGHTS = 3;
-const RECEIVE_REQUEST_TIMEOUT_MS = 5000;
+const RECEIVE_REQUEST_TIMEOUT_MS = 7000;
+const PRELOADED_RECEIVE_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 type ReceiveCount = {
   count: number;
@@ -26,6 +47,8 @@ type LocalOrbitThought = {
   feltThisCount: number;
   madeThinkCount: number;
   availableAt: number;
+  createdAt?: string | null;
+  localCreatedAt?: number;
 };
 
 export type OrbitThoughtSnapshot = Omit<LocalOrbitThought, "availableAt">;
@@ -78,18 +101,137 @@ export type ReceiveThoughtCandidate = {
   madeThinkCount: number;
 };
 
+type PersistedReceiveCache = {
+  updatedAt: number;
+  thoughts: ReceiveThoughtCandidate[];
+};
+
 const preloadedReceiveThoughtsByUser = new Map<string, ReceiveThoughtCandidate[]>();
 const preloadingReceivePromiseByUser = new Map<string, Promise<void>>();
+
+function sanitizeOrbitThought(input: any): LocalOrbitThought | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+
+  const content =
+    typeof input.content === "string" ? input.content.trim() : "";
+
+  if (!content) {
+    return null;
+  }
+
+  const id =
+    typeof input.id === "number" || typeof input.id === "string"
+      ? input.id
+      : `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const availableAt =
+    typeof input.availableAt === "number" && Number.isFinite(input.availableAt)
+      ? input.availableAt
+      : Date.now();
+
+  const createdAtTimestamp =
+    typeof input.createdAt === "string" && input.createdAt
+      ? new Date(input.createdAt).getTime()
+      : NaN;
+
+  const localCreatedAt =
+    typeof input.localCreatedAt === "number" && Number.isFinite(input.localCreatedAt)
+      ? input.localCreatedAt
+      : Number.isFinite(createdAtTimestamp)
+        ? createdAtTimestamp
+        : typeof input.availableAt === "number" && Number.isFinite(input.availableAt)
+          ? input.availableAt
+          : 0;
+
+  return {
+    id,
+    content,
+    mood: typeof input.mood === "string" ? input.mood : input.mood ?? null,
+    feltThisCount:
+      typeof input.feltThisCount === "number" ? input.feltThisCount : 0,
+    madeThinkCount:
+      typeof input.madeThinkCount === "number" ? input.madeThinkCount : 0,
+    availableAt,
+    createdAt: typeof input.createdAt === "string" ? input.createdAt : null,
+    localCreatedAt,
+  };
+}
+
+function dedupeOrbitThoughts(thoughts: LocalOrbitThought[]): LocalOrbitThought[] {
+  const merged = new Map<string, LocalOrbitThought>();
+
+  for (const thought of thoughts) {
+    const sanitized = sanitizeOrbitThought(thought);
+    if (!sanitized) {
+      continue;
+    }
+
+    const stableTimestamp =
+      typeof sanitized.createdAt === "string" && sanitized.createdAt
+        ? sanitized.createdAt
+        : String(sanitized.localCreatedAt ?? 0);
+    const key = `${String(sanitized.id)}::${stableTimestamp}`;
+    const existing = merged.get(key);
+
+    if (!existing) {
+      merged.set(key, sanitized);
+      continue;
+    }
+
+    merged.set(key, {
+      ...existing,
+      ...sanitized,
+      availableAt: Math.min(existing.availableAt, sanitized.availableAt),
+      localCreatedAt: Math.min(
+        existing.localCreatedAt ?? Date.now(),
+        sanitized.localCreatedAt ?? Date.now(),
+      ),
+    });
+  }
+
+  return [...merged.values()].sort((a, b) => {
+    const aTime = a.localCreatedAt ?? 0;
+    const bTime = b.localCreatedAt ?? 0;
+    return bTime - aTime;
+  });
+}
+
+function writeLocalOrbitThoughts(thoughts: LocalOrbitThought[]): void {
+  try {
+    localStorage.setItem(
+      LOCAL_ORBIT_THOUGHTS_KEY,
+      JSON.stringify(dedupeOrbitThoughts(thoughts)),
+    );
+  } catch {
+    // Local orbit persistence should never crash the app.
+  }
+}
 
 function getLocalOrbitThoughts(): LocalOrbitThought[] {
   try {
     const raw = localStorage.getItem(LOCAL_ORBIT_THOUGHTS_KEY);
-    if (!raw) {
-      return [];
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return dedupeOrbitThoughts(Array.isArray(parsed) ? parsed : []);
     }
 
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    for (const legacyKey of LEGACY_LOCAL_ORBIT_THOUGHTS_KEYS) {
+      const legacyRaw = localStorage.getItem(legacyKey);
+      if (!legacyRaw) {
+        continue;
+      }
+
+      const parsed = JSON.parse(legacyRaw);
+      const migrated = dedupeOrbitThoughts(Array.isArray(parsed) ? parsed : []);
+      if (migrated.length > 0) {
+        writeLocalOrbitThoughts(migrated);
+        return migrated;
+      }
+    }
+
+    return [];
   } catch {
     return [];
   }
@@ -151,38 +293,159 @@ function getSeenThoughtStorageKey(userId: string): string {
   return `${SEEN_RECEIVED_THOUGHT_IDS_KEY}:${userId}`;
 }
 
+function getPreloadedReceiveStorageKey(userId: string): string {
+  return `${PRELOADED_RECEIVE_THOUGHTS_CACHE_KEY}:${userId}`;
+}
+
+function getGlobalSeenReceivedThoughtIds(): number[] {
+  try {
+    const sources = [
+      localStorage.getItem(GLOBAL_SEEN_RECEIVED_THOUGHT_IDS_KEY),
+      ...LEGACY_GLOBAL_SEEN_RECEIVED_THOUGHT_IDS_KEYS.map((key) =>
+        localStorage.getItem(key),
+      ),
+    ];
+
+    const merged = sources.flatMap((raw) => {
+      if (!raw) {
+        return [];
+      }
+
+      try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+          return [];
+        }
+
+        return parsed
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0);
+      } catch {
+        return [];
+      }
+    });
+
+    const stable = [...new Set(merged)].slice(-MAX_SEEN_THOUGHT_IDS);
+
+    if (stable.length > 0) {
+      localStorage.setItem(
+        GLOBAL_SEEN_RECEIVED_THOUGHT_IDS_KEY,
+        JSON.stringify(stable),
+      );
+    }
+
+    return stable;
+  } catch {
+    return [];
+  }
+}
+
 function getPreloadedReceiveThoughts(userId: string): ReceiveThoughtCandidate[] {
-  return preloadedReceiveThoughtsByUser.get(userId) ?? [];
+  const existing = preloadedReceiveThoughtsByUser.get(userId);
+  if (existing) {
+    return existing;
+  }
+
+  try {
+    const raw = localStorage.getItem(getPreloadedReceiveStorageKey(userId));
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as PersistedReceiveCache;
+    if (
+      !parsed ||
+      typeof parsed.updatedAt !== "number" ||
+      !Array.isArray(parsed.thoughts) ||
+      Date.now() - parsed.updatedAt > PRELOADED_RECEIVE_CACHE_TTL_MS
+    ) {
+      localStorage.removeItem(getPreloadedReceiveStorageKey(userId));
+      return [];
+    }
+
+    const seenIds = new Set(getSeenReceivedThoughtIds(userId));
+    const sanitized = parsed.thoughts
+      .filter((thought) => thought && Number.isInteger(Number(thought.id)))
+      .map((thought) => ({
+        id: Number(thought.id),
+        content: typeof thought.content === "string" ? thought.content : "",
+        mood: thought.mood ?? null,
+        feltThisCount:
+          typeof thought.feltThisCount === "number" ? thought.feltThisCount : 0,
+        madeThinkCount:
+          typeof thought.madeThinkCount === "number" ? thought.madeThinkCount : 0,
+      }))
+      .filter((thought) => thought.content.trim().length > 0 && !seenIds.has(thought.id))
+      .slice(0, MAX_PRELOADED_RECEIVE_THOUGHTS);
+
+    preloadedReceiveThoughtsByUser.set(userId, sanitized);
+    return sanitized;
+  } catch {
+    return [];
+  }
 }
 
 function setPreloadedReceiveThoughts(
   userId: string,
   thoughts: ReceiveThoughtCandidate[],
 ): void {
-  preloadedReceiveThoughtsByUser.set(
-    userId,
-    thoughts.slice(0, MAX_PRELOADED_RECEIVE_THOUGHTS),
-  );
+  const deduped = thoughts
+    .filter((thought, index, all) => all.findIndex((entry) => entry.id === thought.id) === index)
+    .slice(0, MAX_PRELOADED_RECEIVE_THOUGHTS);
+
+  preloadedReceiveThoughtsByUser.set(userId, deduped);
+
+  try {
+    const payload: PersistedReceiveCache = {
+      updatedAt: Date.now(),
+      thoughts: deduped,
+    };
+    localStorage.setItem(getPreloadedReceiveStorageKey(userId), JSON.stringify(payload));
+  } catch {
+    // Preload persistence is best-effort only.
+  }
 }
 
 function getSeenReceivedThoughtIds(userId: string): number[] {
   try {
-    const raw = localStorage.getItem(getSeenThoughtStorageKey(userId));
-    if (!raw) {
-      return [];
+    const userStorageKey = getSeenThoughtStorageKey(userId);
+    const sources = [
+      localStorage.getItem(userStorageKey),
+      ...LEGACY_SEEN_RECEIVED_THOUGHT_IDS_KEYS.map((key) =>
+        localStorage.getItem(`${key}:${userId}`),
+      ),
+    ];
+
+    const userSeen = sources.flatMap((raw) => {
+      if (!raw) {
+        return [];
+      }
+
+      try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+          return [];
+        }
+
+        return parsed
+          .map((id) => Number(id))
+          .filter((id) => Number.isInteger(id) && id > 0);
+      } catch {
+        return [];
+      }
+    });
+
+    const stable = [
+      ...new Set([...getGlobalSeenReceivedThoughtIds(), ...userSeen]),
+    ].slice(-MAX_SEEN_THOUGHT_IDS);
+
+    if (stable.length > 0) {
+      localStorage.setItem(userStorageKey, JSON.stringify(stable));
     }
 
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed
-      .map((id) => Number(id))
-      .filter((id) => Number.isInteger(id) && id > 0)
-      .slice(-MAX_SEEN_THOUGHT_IDS);
+    return stable;
   } catch {
-    return [];
+    return getGlobalSeenReceivedThoughtIds();
   }
 }
 
@@ -199,6 +462,10 @@ function markThoughtAsSeen(userId: string, thoughtId: unknown): void {
 
   try {
     localStorage.setItem(getSeenThoughtStorageKey(userId), JSON.stringify(next));
+    localStorage.setItem(
+      GLOBAL_SEEN_RECEIVED_THOUGHT_IDS_KEY,
+      JSON.stringify(next),
+    );
   } catch {
     // If storage is full/unavailable, backend receive history still protects users.
   }
@@ -232,6 +499,16 @@ export function popPreloadedReceiveThought(
   const [nextThought, ...remainingThoughts] = existing;
   setPreloadedReceiveThoughts(userId, remainingThoughts);
   return nextThought;
+}
+
+export function restorePreloadedReceiveThought(
+  userId: string,
+  thought: ReceiveThoughtCandidate,
+): void {
+  const existing = getPreloadedReceiveThoughts(userId).filter(
+    (entry) => entry.id !== thought.id,
+  );
+  setPreloadedReceiveThoughts(userId, [thought, ...existing]);
 }
 
 function buildReceiveExclusionIds(
@@ -333,24 +610,46 @@ export function saveThoughtToOrbitAfterRelease(
 ): void {
   const existing = getLocalOrbitThoughts();
 
-  const alreadyExists = existing.some(
-    (entry) =>
-      entry.content === thought.content &&
-      (entry.mood ?? null) === (thought.mood ?? null),
-  );
-
-  if (alreadyExists) {
-    return;
-  }
-
   const newThought: LocalOrbitThought = {
     ...thought,
     availableAt: Date.now() + ORBIT_APPEAR_DELAY_MS,
+    localCreatedAt: thought.localCreatedAt ?? Date.now(),
+    createdAt: thought.createdAt ?? null,
   };
 
-  localStorage.setItem(
-    LOCAL_ORBIT_THOUGHTS_KEY,
-    JSON.stringify([newThought, ...existing]),
+  writeLocalOrbitThoughts([newThought, ...existing]);
+}
+
+export function reconcileOrbitThoughtAfterRelease(
+  optimisticId: number | string,
+  thought: Partial<Omit<LocalOrbitThought, "availableAt">>,
+): void {
+  const existing = getLocalOrbitThoughts();
+  const nextThoughts = existing.map((entry) => {
+    if (String(entry.id) !== String(optimisticId)) {
+      return entry;
+    }
+
+    return {
+      ...entry,
+      ...thought,
+      id: thought.id ?? entry.id,
+      content: thought.content ?? entry.content,
+      mood: thought.mood ?? entry.mood ?? null,
+      feltThisCount: thought.feltThisCount ?? entry.feltThisCount,
+      madeThinkCount: thought.madeThinkCount ?? entry.madeThinkCount,
+      createdAt: thought.createdAt ?? entry.createdAt ?? null,
+      localCreatedAt: entry.localCreatedAt ?? Date.now(),
+    };
+  });
+
+  writeLocalOrbitThoughts(nextThoughts);
+}
+
+export function removeLocalOrbitThought(thoughtId: number | string): void {
+  const existing = getLocalOrbitThoughts();
+  writeLocalOrbitThoughts(
+    existing.filter((entry) => String(entry.id) !== String(thoughtId)),
   );
 }
 
@@ -368,14 +667,71 @@ function getPendingLocalOrbitThoughts(): LocalOrbitThought[] {
   );
 }
 
-function sameThought(
-  a: { content?: string; mood?: string | null },
-  b: { content?: string; mood?: string | null },
+export function getOrbitLocalDebugCounts(): {
+  rawCount: number;
+  visibleCount: number;
+  pendingCount: number;
+} {
+  const rawThoughts = getLocalOrbitThoughts();
+  const now = Date.now();
+
+  return {
+    rawCount: rawThoughts.length,
+    visibleCount: rawThoughts.filter((thought) => thought.availableAt <= now).length,
+    pendingCount: rawThoughts.filter((thought) => thought.availableAt > now).length,
+  };
+}
+
+function getThoughtTimestamp(
+  thought: { createdAt?: string | null; localCreatedAt?: number },
+): number | null {
+  if (typeof thought.localCreatedAt === "number" && Number.isFinite(thought.localCreatedAt)) {
+    return thought.localCreatedAt;
+  }
+
+  if (typeof thought.createdAt === "string" && thought.createdAt) {
+    const timestamp = new Date(thought.createdAt).getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+  }
+
+  return null;
+}
+
+function sameThoughtIdentity(
+  a: {
+    id?: number | string;
+    content?: string;
+    mood?: string | null;
+    createdAt?: string | null;
+    localCreatedAt?: number;
+  },
+  b: {
+    id?: number | string;
+    content?: string;
+    mood?: string | null;
+    createdAt?: string | null;
+    localCreatedAt?: number;
+  },
 ) {
-  return (
-    (a.content ?? "").trim() === (b.content ?? "").trim() &&
-    (a.mood ?? null) === (b.mood ?? null)
-  );
+  if (a.id != null && b.id != null && String(a.id) === String(b.id)) {
+    return true;
+  }
+
+  if (
+    (a.content ?? "").trim() !== (b.content ?? "").trim() ||
+    (a.mood ?? null) !== (b.mood ?? null)
+  ) {
+    return false;
+  }
+
+  const aTimestamp = getThoughtTimestamp(a);
+  const bTimestamp = getThoughtTimestamp(b);
+
+  if (aTimestamp == null || bTimestamp == null) {
+    return false;
+  }
+
+  return Math.abs(aTimestamp - bTimestamp) <= 2 * 60 * 1000;
 }
 
 function filterOutPendingServerThoughts(
@@ -384,7 +740,7 @@ function filterOutPendingServerThoughts(
 ) {
   return serverThoughts.filter((serverThought: any) => {
     return !pendingLocalThoughts.some((pendingThought) =>
-      sameThought(serverThought, pendingThought),
+      sameThoughtIdentity(serverThought, pendingThought),
     );
   });
 }
@@ -394,7 +750,7 @@ function mergeThoughts(serverThoughts: any[], localThoughts: LocalOrbitThought[]
 
   for (const localThought of localThoughts) {
     const exists = combined.some((serverThought: any) =>
-      sameThought(serverThought, localThought),
+      sameThoughtIdentity(serverThought, localThought),
     );
 
     if (!exists) {
@@ -643,6 +999,7 @@ export async function prewarmReceiveExperience(userId?: string): Promise<string>
   const activeUserId = userId || (await initializeAnonymousSession(false)).userId;
 
   await Promise.allSettled([
+    warmBackendConnection(),
     apiFetch<ReceiveCountData>(
       `/thoughts/receive-count?userId=${encodeURIComponent(activeUserId)}`,
     ),
@@ -657,6 +1014,7 @@ export async function prewarmOrbitExperience(userId?: string): Promise<string> {
   const activeUserId = userId || (await initializeAnonymousSession(false)).userId;
 
   await Promise.allSettled([
+    warmBackendConnection(),
     apiFetch<any[]>(`/thoughts/my?userId=${encodeURIComponent(activeUserId)}`),
   ]);
 
