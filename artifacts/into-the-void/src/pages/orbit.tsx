@@ -3,6 +3,7 @@ import {
   getOrbitLocalDebugCounts,
   type OrbitThoughtSnapshot,
   getImmediateLocalOrbitThoughts,
+  ORBIT_LOCAL_THOUGHTS_UPDATED_EVENT,
   useMyThoughts,
   useUser,
 } from "@/hooks/use-thoughts";
@@ -12,6 +13,20 @@ const MAX_VISIBLE_ORBIT_THOUGHTS = 38;
 const PRIORITY_RECENT_THOUGHTS = 22;
 const ORBIT_FALLBACK_TIMEOUT_MS = 1500;
 const ORBIT_DEBUG = import.meta.env.DEV;
+const ORBIT_LAYOUT_MAP_KEY = "void_orbit_layout_map";
+
+type PersistedBubbleLayout = {
+  top: number;
+  left: number;
+  size: number;
+  zIndex: number;
+  opacity: number;
+  edgeOpacity: number;
+  blur: number;
+  brightness: number;
+  depth: number;
+  auraOpacity: number;
+};
 
 type OrbitThought = {
   id: number | string;
@@ -38,6 +53,11 @@ type OrbitThought = {
   glow: string;
   border: string;
   highlight: string;
+};
+
+type StableBubbleLayoutResult = {
+  thoughts: OrbitThought[];
+  layoutMap: Record<string, PersistedBubbleLayout>;
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -72,30 +92,6 @@ function getReactionBoost(feltThisCount = 0, madeThinkCount = 0): number {
   return Math.min(totalReactions, 6) * 4;
 }
 
-function mergeOrbitThoughts(
-  serverThoughts: OrbitThoughtSnapshot[],
-  localThoughts: OrbitThoughtSnapshot[],
-): OrbitThoughtSnapshot[] {
-  const merged = [...serverThoughts];
-
-  for (const localThought of localThoughts) {
-    const exists = merged.some((serverThought) => {
-      return (
-        String(serverThought.id) === String(localThought.id) ||
-        ((serverThought.content ?? "").trim() ===
-          (localThought.content ?? "").trim() &&
-          (serverThought.mood ?? null) === (localThought.mood ?? null))
-      );
-    });
-
-    if (!exists) {
-      merged.push(localThought);
-    }
-  }
-
-  return merged;
-}
-
 function getThoughtTime(thought: OrbitThoughtSnapshot): number {
   if (
     typeof (thought as { localCreatedAt?: number }).localCreatedAt === "number" &&
@@ -117,6 +113,18 @@ function getThoughtTime(thought: OrbitThoughtSnapshot): number {
   return Number.isFinite(numericId) ? numericId : hashSeed(String(thought.id));
 }
 
+function getStableThoughtKey(thought: OrbitThoughtSnapshot): string {
+  const numericId = Number(thought.id);
+  if (Number.isInteger(numericId) && numericId > 0) {
+    return `id:${numericId}`;
+  }
+
+  const timestamp = getThoughtTime(thought);
+  const content = (thought.content ?? "").trim();
+  const mood = thought.mood ?? "";
+  return `content:${hashSeed(`${content}|${mood}|${timestamp}`)}`;
+}
+
 function sortOrbitThoughts(thoughts: OrbitThoughtSnapshot[]): OrbitThoughtSnapshot[] {
   return [...thoughts].sort((a, b) => {
     const timeDiff = getThoughtTime(b) - getThoughtTime(a);
@@ -130,18 +138,30 @@ function sortOrbitThoughts(thoughts: OrbitThoughtSnapshot[]): OrbitThoughtSnapsh
 
 function buildThoughtIdentityKey(thoughts: OrbitThoughtSnapshot[]): string {
   return thoughts
-    .map((thought) => {
-      const createdAt =
-        typeof (thought as { createdAt?: string | null }).createdAt === "string"
-          ? ((thought as { createdAt?: string | null }).createdAt as string)
-          : "";
-      const localCreatedAt =
-        typeof (thought as { localCreatedAt?: number }).localCreatedAt === "number"
-          ? String((thought as { localCreatedAt?: number }).localCreatedAt)
-          : "";
-      return `${String(thought.id)}:${createdAt}:${localCreatedAt}`;
-    })
+    .map((thought) => getStableThoughtKey(thought))
     .join("|");
+}
+
+function readOrbitLayoutMap(): Record<string, PersistedBubbleLayout> {
+  try {
+    const raw = localStorage.getItem(ORBIT_LAYOUT_MAP_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeOrbitLayoutMap(layoutMap: Record<string, PersistedBubbleLayout>): void {
+  try {
+    localStorage.setItem(ORBIT_LAYOUT_MAP_KEY, JSON.stringify(layoutMap));
+  } catch {
+    // Layout persistence is best effort only.
+  }
 }
 
 function selectVisibleThoughts(thoughts: OrbitThoughtSnapshot[]): OrbitThoughtSnapshot[] {
@@ -204,21 +224,25 @@ const LOW_COUNT_LAYOUTS: Record<number, Array<{ top: number; left: number }>> = 
   ],
 };
 
-function getStableBubbleLayout(thoughts: OrbitThoughtSnapshot[]): OrbitThought[] {
+function getStableBubbleLayout(thoughts: OrbitThoughtSnapshot[]): StableBubbleLayoutResult {
   const visibleThoughts = selectVisibleThoughts(thoughts);
   const densityFactor = clamp(
     visibleThoughts.length / MAX_VISIBLE_ORBIT_THOUGHTS,
     0,
     1,
   );
+  const existingLayoutMap = readOrbitLayoutMap();
+  const nextLayoutMap: Record<string, PersistedBubbleLayout> = {
+    ...existingLayoutMap,
+  };
 
-  return visibleThoughts.map((thought, index) => {
+  const positionedThoughts = visibleThoughts.map((thought, index) => {
     const feltThisCount =
       typeof thought?.feltThisCount === "number" ? thought.feltThisCount : 0;
     const madeThinkCount =
       typeof thought?.madeThinkCount === "number" ? thought.madeThinkCount : 0;
     const totalReactions = feltThisCount + madeThinkCount;
-    const id = thought?.id ?? `thought-${index}`;
+    const id = getStableThoughtKey(thought);
     const recencyRatio =
       visibleThoughts.length <= 1 ? 0 : index / (visibleThoughts.length - 1);
     const depth = 1 - recencyRatio;
@@ -271,6 +295,22 @@ function getStableBubbleLayout(thoughts: OrbitThoughtSnapshot[]): OrbitThought[]
       0.32,
     );
 
+    const persistedLayout = existingLayoutMap[id];
+    const computedLayout: PersistedBubbleLayout = persistedLayout ?? {
+      top,
+      left,
+      size,
+      zIndex: visibleThoughts.length - index,
+      opacity,
+      edgeOpacity,
+      blur,
+      brightness,
+      depth,
+      auraOpacity,
+    };
+
+    nextLayoutMap[id] = computedLayout;
+
     return {
       id,
       content:
@@ -280,16 +320,16 @@ function getStableBubbleLayout(thoughts: OrbitThoughtSnapshot[]): OrbitThought[]
       mood: thought?.mood ?? null,
       feltThisCount,
       madeThinkCount,
-      size,
-      top,
-      left,
-      opacity,
-      edgeOpacity,
-      blur,
-      zIndex,
-      brightness,
-      depth,
-      auraOpacity,
+      size: computedLayout.size,
+      top: computedLayout.top,
+      left: computedLayout.left,
+      opacity: computedLayout.opacity,
+      edgeOpacity: computedLayout.edgeOpacity,
+      blur: computedLayout.blur,
+      zIndex: computedLayout.zIndex,
+      brightness: computedLayout.brightness,
+      depth: computedLayout.depth,
+      auraOpacity: computedLayout.auraOpacity,
       pulseDuration: 0,
       pulseScale: 1,
       driftX: 0,
@@ -316,6 +356,11 @@ function getStableBubbleLayout(thoughts: OrbitThoughtSnapshot[]): OrbitThought[]
             : "radial-gradient(ellipse, rgba(255,255,255,0.60) 0%, rgba(255,255,255,0.14) 52%, transparent 100%)",
     };
   });
+
+  return {
+    thoughts: positionedThoughts,
+    layoutMap: nextLayoutMap,
+  };
 }
 
 export default function Orbit() {
@@ -337,26 +382,82 @@ export default function Orbit() {
   });
 
   useEffect(() => {
-    const nextLocalThoughts = getImmediateLocalOrbitThoughts();
-    setLocalOrbitThoughts(nextLocalThoughts);
-    if (ORBIT_DEBUG) {
-      const debugCounts = getOrbitLocalDebugCounts();
-      console.log("Orbit local raw count:", debugCounts.rawCount);
-      console.log("Orbit visible local count:", debugCounts.visibleCount);
-      if (nextLocalThoughts.length > 0) {
-        console.log("Orbit rendered from local");
+    const syncLocalOrbitThoughts = () => {
+      const nextLocalThoughts = getImmediateLocalOrbitThoughts();
+      setLocalOrbitThoughts(nextLocalThoughts);
+      if (ORBIT_DEBUG) {
+        const debugCounts = getOrbitLocalDebugCounts();
+        console.log("Orbit local raw count:", debugCounts.rawCount);
+        console.log("Orbit visible local count:", debugCounts.visibleCount);
+        if (nextLocalThoughts.length > 0) {
+          console.log("Orbit rendered from local");
+        }
       }
-    }
+    };
+
+    syncLocalOrbitThoughts();
+    window.addEventListener("focus", syncLocalOrbitThoughts);
+    document.addEventListener("visibilitychange", syncLocalOrbitThoughts);
+    window.addEventListener("storage", syncLocalOrbitThoughts);
+    window.addEventListener(
+      ORBIT_LOCAL_THOUGHTS_UPDATED_EVENT,
+      syncLocalOrbitThoughts as EventListener,
+    );
+
+    return () => {
+      window.removeEventListener("focus", syncLocalOrbitThoughts);
+      document.removeEventListener("visibilitychange", syncLocalOrbitThoughts);
+      window.removeEventListener("storage", syncLocalOrbitThoughts);
+      window.removeEventListener(
+        ORBIT_LOCAL_THOUGHTS_UPDATED_EVENT,
+        syncLocalOrbitThoughts as EventListener,
+      );
+    };
   }, []);
 
-  const serverThoughts = useMemo(
-    () => sortOrbitThoughts(Array.isArray(data) ? (data as OrbitThoughtSnapshot[]) : []),
-    [data],
-  );
-  const mergedThoughts = useMemo(
-    () => sortOrbitThoughts(mergeOrbitThoughts(serverThoughts, localOrbitThoughts)),
-    [localOrbitThoughts, serverThoughts],
-  );
+  const serverThoughts = useMemo(() => {
+    const incoming = Array.isArray(data) ? (data as OrbitThoughtSnapshot[]) : [];
+    const localKeys = new Set(localOrbitThoughts.map((thought) => getStableThoughtKey(thought)));
+    return sortOrbitThoughts(
+      incoming.filter((thought) => !localKeys.has(getStableThoughtKey(thought))),
+    );
+  }, [data, localOrbitThoughts]);
+  const mergedThoughts = useMemo(() => {
+    const mergedMap = new Map<string, OrbitThoughtSnapshot>();
+
+    for (const thought of localOrbitThoughts) {
+      mergedMap.set(getStableThoughtKey(thought), thought);
+    }
+
+    for (const thought of serverThoughts) {
+      const stableKey = getStableThoughtKey(thought);
+      const existing = mergedMap.get(stableKey);
+      if (!existing) {
+        mergedMap.set(stableKey, thought);
+        continue;
+      }
+
+      mergedMap.set(stableKey, {
+        ...thought,
+        ...existing,
+        id: existing.id ?? thought.id,
+        content: existing.content ?? thought.content,
+        mood: existing.mood ?? thought.mood,
+        feltThisCount:
+          typeof thought.feltThisCount === "number"
+            ? thought.feltThisCount
+            : existing.feltThisCount,
+        madeThinkCount:
+          typeof thought.madeThinkCount === "number"
+            ? thought.madeThinkCount
+            : existing.madeThinkCount,
+        createdAt: existing.createdAt ?? thought.createdAt,
+        localCreatedAt: existing.localCreatedAt ?? getThoughtTime(existing),
+      });
+    }
+
+    return sortOrbitThoughts([...mergedMap.values()]);
+  }, [localOrbitThoughts, serverThoughts]);
   const thoughtIdentityKey = useMemo(
     () => buildThoughtIdentityKey(mergedThoughts),
     [mergedThoughts],
@@ -365,10 +466,15 @@ export default function Orbit() {
   const serverSettled = isFetched || isError;
   const shouldShowLoading = !hasVisibleThoughts && showLoadingMessage && !serverSettled;
 
-  const stableThoughts = useMemo(
+  const stableBubbleLayout = useMemo(
     () => getStableBubbleLayout(mergedThoughts),
     [thoughtIdentityKey],
   );
+  const stableThoughts = stableBubbleLayout.thoughts;
+
+  useEffect(() => {
+    writeOrbitLayoutMap(stableBubbleLayout.layoutMap);
+  }, [thoughtIdentityKey, stableBubbleLayout.layoutMap]);
 
   useEffect(() => {
     if (ORBIT_DEBUG) {
@@ -376,8 +482,12 @@ export default function Orbit() {
       console.log("Orbit merged count:", mergedThoughts.length);
       console.log("Orbit rendered real bubbles count:", stableThoughts.length);
       console.log("Orbit phantom bubbles count:", 0);
+      console.log(
+        "Orbit layout map count:",
+        Object.keys(stableBubbleLayout.layoutMap).length,
+      );
     }
-  }, [mergedThoughts.length, serverThoughts.length, stableThoughts.length]);
+  }, [mergedThoughts.length, serverThoughts.length, stableThoughts.length, stableBubbleLayout.layoutMap]);
 
   useEffect(() => {
     if (hasVisibleThoughts) {
@@ -429,6 +539,25 @@ export default function Orbit() {
 
   return (
     <div className="min-h-screen p-4 sm:p-6 pb-36 overflow-hidden relative">
+      <div className="absolute inset-0 pointer-events-none">
+        <div
+          className="absolute inset-[-12%]"
+          style={{
+            background:
+              "radial-gradient(circle at 50% 12%, rgba(182,146,255,0.14) 0%, rgba(116,84,204,0.10) 18%, rgba(56,38,118,0.06) 36%, rgba(10,8,28,0) 74%)",
+            filter: "blur(42px)",
+          }}
+        />
+        <div
+          className="absolute left-1/2 top-[28%] h-[46vh] w-[72vw] max-w-[760px] -translate-x-1/2 rounded-full"
+          style={{
+            background:
+              "radial-gradient(circle, rgba(158,116,246,0.10) 0%, rgba(108,76,190,0.07) 32%, rgba(20,14,42,0) 72%)",
+            filter: "blur(32px)",
+          }}
+        />
+      </div>
+
       <div className="pt-8 text-center">
         <h1
           className="text-4xl md:text-5xl text-white/90"
@@ -473,14 +602,14 @@ export default function Orbit() {
         )}
       </div>
 
-      <div className="relative h-[72vh] mt-6 overflow-hidden">
+      <div className="relative min-h-[72vh] -mt-2 overflow-hidden">
         <div className="absolute inset-0 pointer-events-none">
           <div
-            className="absolute inset-[-18%]"
+            className="absolute left-1/2 top-[12%] h-[12rem] w-[28rem] max-w-[88vw] -translate-x-1/2 rounded-full"
             style={{
               background:
-                "radial-gradient(circle at 50% 18%, rgba(170,135,255,0.10) 0%, rgba(112,82,198,0.08) 18%, rgba(58,40,112,0.05) 34%, rgba(16,10,40,0) 72%)",
-              filter: "blur(30px)",
+                "radial-gradient(circle, rgba(214,188,255,0.08) 0%, rgba(154,118,245,0.08) 42%, rgba(20,14,42,0) 78%)",
+              filter: "blur(26px)",
             }}
           />
         </div>

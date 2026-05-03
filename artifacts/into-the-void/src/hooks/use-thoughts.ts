@@ -9,14 +9,16 @@ import { useUser } from "./use-user";
 
 export { useUser };
 
-const LOCAL_ORBIT_THOUGHTS_KEY = "void_local_orbit_thoughts_v5";
+const LOCAL_ORBIT_THOUGHTS_KEY = "void_local_orbit_thoughts";
 const LEGACY_LOCAL_ORBIT_THOUGHTS_KEYS = [
+  "void_local_orbit_thoughts_v5",
   "void_local_orbit_thoughts_v4",
   "void_local_orbit_thoughts_v3",
   "void_local_orbit_thoughts_v2",
   "void_local_orbit_thoughts_v1",
-  "void_local_orbit_thoughts",
 ] as const;
+export const ORBIT_LOCAL_THOUGHTS_UPDATED_EVENT =
+  "void:orbit-local-thoughts-updated";
 const RECEIVE_COUNT_CACHE_KEY = "void_receive_count_cache_v1";
 const SEEN_RECEIVED_THOUGHT_IDS_KEY = "void_seen_received_thought_ids";
 const GLOBAL_SEEN_RECEIVED_THOUGHT_IDS_KEY =
@@ -200,10 +202,15 @@ function dedupeOrbitThoughts(thoughts: LocalOrbitThought[]): LocalOrbitThought[]
 
 function writeLocalOrbitThoughts(thoughts: LocalOrbitThought[]): void {
   try {
-    localStorage.setItem(
-      LOCAL_ORBIT_THOUGHTS_KEY,
-      JSON.stringify(dedupeOrbitThoughts(thoughts)),
-    );
+    const deduped = dedupeOrbitThoughts(thoughts);
+    localStorage.setItem(LOCAL_ORBIT_THOUGHTS_KEY, JSON.stringify(deduped));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent(ORBIT_LOCAL_THOUGHTS_UPDATED_EVENT, {
+          detail: { count: deduped.length },
+        }),
+      );
+    }
   } catch {
     // Local orbit persistence should never crash the app.
   }
@@ -225,10 +232,8 @@ function getLocalOrbitThoughts(): LocalOrbitThought[] {
 
       const parsed = JSON.parse(legacyRaw);
       const migrated = dedupeOrbitThoughts(Array.isArray(parsed) ? parsed : []);
-      if (migrated.length > 0) {
-        writeLocalOrbitThoughts(migrated);
-        return migrated;
-      }
+      writeLocalOrbitThoughts(migrated);
+      return migrated;
     }
 
     return [];
