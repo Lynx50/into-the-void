@@ -1,10 +1,16 @@
-import { Router, type IRouter, type Request, type RequestHandler } from "express";
+import {
+  Router,
+  type IRouter,
+  type Request,
+  type RequestHandler,
+} from "express";
 import {
   db,
   thoughtsTable,
   receivesTable,
   reactionsTable,
   anonymousUsersTable,
+  dailyThoughtSelectionsTable,
 } from "@workspace/db";
 import {
   SubmitThoughtBody,
@@ -14,18 +20,24 @@ import {
   ReactToThoughtParams,
   ReactToThoughtBody,
 } from "@workspace/api-zod";
-import { eq, sql, ne, and, gte, count } from "drizzle-orm";
+import { eq, sql, ne, and, gte, lt, count } from "drizzle-orm";
+import { isValidAnonymousUserId, resolveSessionUserId } from "../lib/session";
 import {
-  isValidAnonymousUserId,
-  resolveSessionUserId,
-} from "../lib/session";
+  recentCutoff,
+  SEED_USER_ID,
+  selectReceiveCandidate,
+} from "../lib/thought-selection";
+import { getOrCreateDailyThought } from "../lib/daily-thought-service";
+import {
+  isBlockedContent,
+  isObviousSubmissionJunk,
+} from "../lib/content-safety";
+import { buildPublicDailyThoughtResponse } from "../lib/daily-thought-selection";
 
 const router: IRouter = Router();
 
 const DAILY_RECEIVE_LIMIT = 3;
 const REPORT_HIDE_THRESHOLD = 3;
-const SEED_USER_ID = "__seed__";
-
 type RateLimitRule = {
   windowMs: number;
   max: number;
@@ -95,7 +107,15 @@ function resolveAuthenticatedUserId(
 function getStartOfUtcDay(): Date {
   const now = new Date();
   return new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0)
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      0,
+      0,
+      0,
+      0,
+    ),
   );
 }
 
@@ -117,52 +137,119 @@ async function findReceiveCandidate(
   userId: string,
   excludedThoughtIds: number[],
 ) {
-  const { notReported, notReportedByUser, notAlreadySeen, notClientSeen } =
-    buildEligibleThoughtPredicates(userId, excludedThoughtIds);
+  const moderationStatus = sql<string>`COALESCE(
+    to_jsonb(${thoughtsTable})->>'moderation_status',
+    'active'
+  )`;
+  const {
+    activeAndEligible,
+    notReported,
+    notReportedByUser,
+    notAlreadySeen,
+    notClientSeen,
+  } = buildEligibleThoughtPredicates(userId, excludedThoughtIds);
   const selectShape = {
     id: thoughtsTable.id,
+    userId: thoughtsTable.userId,
     content: thoughtsTable.content,
     mood: thoughtsTable.mood,
     feltThisCount: thoughtsTable.feltThisCount,
     madeThinkCount: thoughtsTable.madeThinkCount,
+    createdAt: thoughtsTable.createdAt,
+    moderationStatus,
   };
 
-  const baseConditions = [
-    ne(thoughtsTable.userId, userId),
+  const sharedConditions = [
+    activeAndEligible,
     notReported,
     notReportedByUser,
     notAlreadySeen,
     notClientSeen,
   ] as const;
+  const userConditions = [
+    ne(thoughtsTable.userId, userId),
+    ne(thoughtsTable.userId, SEED_USER_ID),
+    ...sharedConditions,
+  ] as const;
 
-  const orderByClause =
-    sql`RANDOM() * (${thoughtsTable.feltThisCount} + ${thoughtsTable.madeThinkCount} + 1) DESC`;
+  const cutoff = recentCutoff();
+  const [recentThoughts, establishedThoughts] = await Promise.all([
+    db
+      .select(selectShape)
+      .from(thoughtsTable)
+      .where(and(...userConditions, gte(thoughtsTable.createdAt, cutoff)))
+      .orderBy(sql`RANDOM()`)
+      .limit(24),
+    db
+      .select(selectShape)
+      .from(thoughtsTable)
+      .where(and(...userConditions, lt(thoughtsTable.createdAt, cutoff)))
+      .orderBy(sql`RANDOM()`)
+      .limit(24),
+  ]);
 
-  const realThoughts = await db
-    .select(selectShape)
-    .from(thoughtsTable)
-    .where(and(...baseConditions, ne(thoughtsTable.userId, SEED_USER_ID)))
-    .orderBy(orderByClause)
-    .limit(1);
-
-  if (realThoughts[0]) {
-    return realThoughts[0];
+  const userSelection = selectReceiveCandidate(
+    recentThoughts,
+    establishedThoughts,
+    [],
+  );
+  if (userSelection) {
+    return { ...userSelection.candidate, source: userSelection.source };
   }
 
-  const seedThoughts = await db
+  const fallbackSeeds = await db
     .select(selectShape)
     .from(thoughtsTable)
-    .where(and(...baseConditions, eq(thoughtsTable.userId, SEED_USER_ID)))
-    .orderBy(orderByClause)
-    .limit(1);
+    .where(and(eq(thoughtsTable.userId, SEED_USER_ID), ...sharedConditions))
+    .orderBy(sql`RANDOM()`)
+    .limit(24);
+  const seedSelection = selectReceiveCandidate([], [], fallbackSeeds);
 
-  return seedThoughts[0];
+  return seedSelection
+    ? { ...seedSelection.candidate, source: seedSelection.source }
+    : undefined;
+}
+
+async function getUserThoughtCounts(userId: string): Promise<{
+  totalThoughts: number;
+  thoughtsToday: number;
+}> {
+  const startOfDay = getStartOfUtcDay();
+
+  const [[totalResult], [todayResult]] = await Promise.all([
+    db
+      .select({ count: count() })
+      .from(thoughtsTable)
+      .where(eq(thoughtsTable.userId, userId)),
+    db
+      .select({ count: count() })
+      .from(thoughtsTable)
+      .where(
+        and(
+          eq(thoughtsTable.userId, userId),
+          gte(thoughtsTable.createdAt, startOfDay),
+        ),
+      ),
+  ]);
+
+  return {
+    totalThoughts: Number(totalResult?.count ?? 0),
+    thoughtsToday: Number(todayResult?.count ?? 0),
+  };
 }
 
 function buildEligibleThoughtPredicates(
   userId: string,
   excludedThoughtIds: number[] = [],
 ) {
+  const activeAndEligible = and(
+    sql`COALESCE(
+      to_jsonb(${thoughtsTable})->>'moderation_status',
+      'active'
+    ) = 'active'`,
+    sql`LENGTH(BTRIM(${thoughtsTable.content})) > 0`,
+    sql`LOWER(BTRIM(${thoughtsTable.content})) !~ '^(test(ing)?([[:space:][:punct:]]*[0-9]+)?|hello([[:space:]]+test([[:space:][:punct:]]*[0-9]+)?)?|hi|sample|asdf+|qwerty+|zxcv+)$'`,
+  );
   const notReported = sql`(
     SELECT COUNT(*) FROM reactions
     WHERE reactions.thought_id = ${thoughtsTable.id}
@@ -188,6 +275,7 @@ function buildEligibleThoughtPredicates(
       : sql`TRUE`;
 
   return {
+    activeAndEligible,
     notReported,
     notReportedByUser,
     notAlreadySeen,
@@ -302,69 +390,6 @@ const reportRateLimit = createRateLimitMiddleware(
   (req) => (typeof req.body?.userId === "string" ? req.body.userId : undefined),
 );
 
-const BLOCKED_PHRASES = [
-  "kill myself",
-  "killing myself",
-  "end my life",
-  "end it all",
-  "take my life",
-  "want to die",
-  "wanna die",
-  "going to die",
-  "gonna die",
-  "ready to die",
-  "hurt myself",
-  "harm myself",
-  "cut myself",
-  "cutting myself",
-  "overdose",
-  "overdosing",
-  "don't want to be here anymore",
-  "can't go on",
-  "cannot go on",
-  "no point living",
-  "no reason to live",
-  "better off dead",
-  "better off without me",
-
-  "kill you",
-  "kill her",
-  "kill him",
-  "kill them",
-  "gonna hurt",
-  "going to hurt",
-  "i will hurt",
-  "i'll hurt",
-  "bomb",
-  "shooting",
-  "massacre",
-  "attack",
-
-  "nigger",
-  "nigga",
-  "faggot",
-  " fag ",
-  "chink",
-  "spic",
-  "kike",
-  "wetback",
-  "tranny",
-  "raghead",
-  "sandnigger",
-  "gook",
-  "zipperhead",
-
-  "rape",
-  "molest",
-  "child porn",
-  "pedophile",
-];
-
-function isBlocked(text: string): boolean {
-  const t = " " + text.toLowerCase() + " ";
-  return BLOCKED_PHRASES.some((phrase) => t.includes(phrase));
-}
-
 router.post("/thoughts", submitRateLimit, async (req, res) => {
   const parsed = SubmitThoughtBody.safeParse(req.body);
   if (!parsed.success) {
@@ -386,7 +411,14 @@ router.post("/thoughts", submitRateLimit, async (req, res) => {
     return;
   }
 
-  if (isBlocked(content)) {
+  if (isObviousSubmissionJunk(content)) {
+    res
+      .status(422)
+      .json({ error: "This thought doesn't look ready to release." });
+    return;
+  }
+
+  if (isBlockedContent(content)) {
     res.status(422).json({ error: "This thought can't be shared here." });
     return;
   }
@@ -418,6 +450,8 @@ router.post("/thoughts", submitRateLimit, async (req, res) => {
       mood: thought.mood,
       feltThisCount: thought.feltThisCount,
       madeThinkCount: thought.madeThinkCount,
+      reactionCount: thought.feltThisCount + thought.madeThinkCount,
+      hasReactions: thought.feltThisCount + thought.madeThinkCount > 0,
       createdAt: thought.createdAt.toISOString(),
     });
   } catch (err: any) {
@@ -447,14 +481,18 @@ router.post("/thoughts/receive", receiveRateLimit, async (req, res) => {
   try {
     await ensureAnonymousUser(userId);
 
-    const [userThoughtCount] = await db
-      .select({ count: count() })
-      .from(thoughtsTable)
-      .where(eq(thoughtsTable.userId, userId));
+    const { totalThoughts, thoughtsToday } = await getUserThoughtCounts(userId);
 
-    if ((userThoughtCount?.count ?? 0) === 0) {
+    if (totalThoughts === 0) {
       res.status(403).json({
-        error: "Release a thought first before you can receive one.",
+        error: "Release one thought to wake the void today.",
+      });
+      return;
+    }
+
+    if (thoughtsToday === 0) {
+      res.status(403).json({
+        error: "Release one thought to wake the void today.",
       });
       return;
     }
@@ -485,7 +523,7 @@ router.post("/thoughts/receive", receiveRateLimit, async (req, res) => {
 
     if (!thought) {
       res.status(404).json({
-        error: "No new thoughts right now. Release one and come back later.",
+        error: "The void is quiet right now. Try again soon.",
       });
       return;
     }
@@ -503,7 +541,7 @@ router.post("/thoughts/receive", receiveRateLimit, async (req, res) => {
 
     if (existingReceive) {
       res.status(404).json({
-        error: "No new thoughts right now. Release one and come back later.",
+        error: "The void is quiet right now. Try again soon.",
       });
       return;
     }
@@ -520,6 +558,9 @@ router.post("/thoughts/receive", receiveRateLimit, async (req, res) => {
       mood: thought.mood,
       feltThisCount: thought.feltThisCount,
       madeThinkCount: thought.madeThinkCount,
+      reactionCount: thought.feltThisCount + thought.madeThinkCount,
+      hasReactions: thought.feltThisCount + thought.madeThinkCount > 0,
+      source: thought.source,
     });
   } catch (err: any) {
     console.error("POST /thoughts/receive ERROR:", err);
@@ -548,34 +589,11 @@ router.post("/thoughts/receive-preview", receiveRateLimit, async (req, res) => {
   try {
     await ensureAnonymousUser(userId);
 
-    const [userThoughtCount] = await db
-      .select({ count: count() })
-      .from(thoughtsTable)
-      .where(eq(thoughtsTable.userId, userId));
+    const { totalThoughts } = await getUserThoughtCounts(userId);
 
-    if ((userThoughtCount?.count ?? 0) === 0) {
+    if (totalThoughts === 0) {
       res.status(403).json({
         error: "Release a thought first before you can receive one.",
-      });
-      return;
-    }
-
-    const startOfDay = getStartOfUtcDay();
-    const [todayCountResult] = await db
-      .select({ count: count() })
-      .from(receivesTable)
-      .where(
-        and(
-          eq(receivesTable.userId, userId),
-          gte(receivesTable.receivedAt, startOfDay),
-        ),
-      );
-
-    const todayCount = Number(todayCountResult?.count ?? 0);
-    const isDev = process.env.NODE_ENV === "development";
-    if (!isDev && todayCount >= DAILY_RECEIVE_LIMIT) {
-      res.status(429).json({
-        error: "Daily receive limit reached. Come back tomorrow.",
       });
       return;
     }
@@ -584,12 +602,21 @@ router.post("/thoughts/receive-preview", receiveRateLimit, async (req, res) => {
 
     if (!thought) {
       res.status(404).json({
-        error: "No new thoughts right now. Release one and come back later.",
+        error: "The void is quiet right now. Try again soon.",
       });
       return;
     }
 
-    res.json(thought);
+    res.json({
+      id: thought.id,
+      content: thought.content,
+      mood: thought.mood,
+      feltThisCount: thought.feltThisCount,
+      madeThinkCount: thought.madeThinkCount,
+      reactionCount: thought.feltThisCount + thought.madeThinkCount,
+      hasReactions: thought.feltThisCount + thought.madeThinkCount > 0,
+      source: thought.source,
+    });
   } catch (err: any) {
     console.error("POST /thoughts/receive-preview ERROR:", err);
     res.status(500).json({ error: "Failed to preview thought" });
@@ -621,14 +648,18 @@ router.post("/thoughts/receive-claim", receiveRateLimit, async (req, res) => {
   try {
     await ensureAnonymousUser(userId);
 
-    const [userThoughtCount] = await db
-      .select({ count: count() })
-      .from(thoughtsTable)
-      .where(eq(thoughtsTable.userId, userId));
+    const { totalThoughts, thoughtsToday } = await getUserThoughtCounts(userId);
 
-    if ((userThoughtCount?.count ?? 0) === 0) {
+    if (totalThoughts === 0) {
       res.status(403).json({
-        error: "Release a thought first before you can receive one.",
+        error: "Release one thought to wake the void today.",
+      });
+      return;
+    }
+
+    if (thoughtsToday === 0) {
+      res.status(403).json({
+        error: "Release one thought to wake the void today.",
       });
       return;
     }
@@ -670,6 +701,7 @@ router.post("/thoughts/receive-claim", receiveRateLimit, async (req, res) => {
     }
 
     const {
+      activeAndEligible,
       notReported,
       notReportedByUser,
       notAlreadySeen,
@@ -678,6 +710,7 @@ router.post("/thoughts/receive-claim", receiveRateLimit, async (req, res) => {
     const [thought] = await db
       .select({
         id: thoughtsTable.id,
+        userId: thoughtsTable.userId,
         content: thoughtsTable.content,
         mood: thoughtsTable.mood,
         feltThisCount: thoughtsTable.feltThisCount,
@@ -688,6 +721,7 @@ router.post("/thoughts/receive-claim", receiveRateLimit, async (req, res) => {
         and(
           eq(thoughtsTable.id, thoughtId),
           ne(thoughtsTable.userId, userId),
+          activeAndEligible,
           notReported,
           notReportedByUser,
           notAlreadySeen,
@@ -708,7 +742,16 @@ router.post("/thoughts/receive-claim", receiveRateLimit, async (req, res) => {
       receivedAt: new Date(),
     });
 
-    res.json(thought);
+    res.json({
+      id: thought.id,
+      content: thought.content,
+      mood: thought.mood,
+      feltThisCount: thought.feltThisCount,
+      madeThinkCount: thought.madeThinkCount,
+      reactionCount: thought.feltThisCount + thought.madeThinkCount,
+      hasReactions: thought.feltThisCount + thought.madeThinkCount > 0,
+      source: thought.userId === SEED_USER_ID ? "seed" : "user",
+    });
   } catch (err: any) {
     console.error("POST /thoughts/receive-claim ERROR:", err);
     res.status(500).json({ error: "Failed to claim thought" });
@@ -742,6 +785,11 @@ router.get("/thoughts/my", async (req, res) => {
         feltThisCount: thoughtsTable.feltThisCount,
         madeThinkCount: thoughtsTable.madeThinkCount,
         createdAt: thoughtsTable.createdAt,
+        chosenAsThoughtOfDay: sql<boolean>`EXISTS (
+          SELECT 1 FROM ${dailyThoughtSelectionsTable}
+          WHERE ${dailyThoughtSelectionsTable.thoughtId} = ${thoughtsTable.id}
+            AND ${dailyThoughtSelectionsTable.dateUtc} = CURRENT_DATE
+        )`,
       })
       .from(thoughtsTable)
       .where(eq(thoughtsTable.userId, userId))
@@ -755,12 +803,42 @@ router.get("/thoughts/my", async (req, res) => {
         mood: t.mood,
         feltThisCount: t.feltThisCount,
         madeThinkCount: t.madeThinkCount,
+        reactionCount: t.feltThisCount + t.madeThinkCount,
+        hasReactions: t.feltThisCount + t.madeThinkCount > 0,
         createdAt: t.createdAt.toISOString(),
+        chosenAsThoughtOfDay: t.chosenAsThoughtOfDay,
       })),
     );
   } catch (err: any) {
     console.error("GET /thoughts/my ERROR:", err);
     res.status(500).json({ error: "Failed to load thoughts" });
+  }
+});
+
+router.get("/thoughts/daily", async (req, res) => {
+  const parsed = GetMyThoughtsQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Missing userId" });
+    return;
+  }
+
+  const auth = resolveAuthenticatedUserId(req, parsed.data.userId);
+  if (!auth.ok) {
+    res.status(auth.status).json({ error: auth.error });
+    return;
+  }
+
+  try {
+    const dailyThought = await getOrCreateDailyThought();
+    const dateUtc = new Date().toISOString().slice(0, 10);
+
+    // Never expose the selected thought or author identifiers to clients.
+    res.json(
+      buildPublicDailyThoughtResponse(dailyThought, auth.userId, dateUtc),
+    );
+  } catch (err: any) {
+    console.error("GET /thoughts/daily ERROR:", err);
+    res.status(500).json({ error: "Failed to load Thought of the Day" });
   }
 });
 
@@ -782,6 +860,7 @@ router.get("/thoughts/receive-count", async (req, res) => {
 
   try {
     await ensureAnonymousUser(userId);
+    const { thoughtsToday } = await getUserThoughtCounts(userId);
 
     const [result] = await db
       .select({ count: count() })
@@ -799,6 +878,7 @@ router.get("/thoughts/receive-count", async (req, res) => {
       count: usedCount,
       limit: DAILY_RECEIVE_LIMIT,
       remaining: Math.max(0, DAILY_RECEIVE_LIMIT - usedCount),
+      unlockedToday: thoughtsToday > 0,
     });
   } catch (err: any) {
     console.error("GET /thoughts/receive-count ERROR:", err);
@@ -869,6 +949,8 @@ router.post("/thoughts/:id/react", reactRateLimit, async (req, res) => {
         mood: thought.mood,
         feltThisCount: thought.feltThisCount,
         madeThinkCount: thought.madeThinkCount,
+        reactionCount: thought.feltThisCount + thought.madeThinkCount,
+        hasReactions: thought.feltThisCount + thought.madeThinkCount > 0,
         createdAt: thought.createdAt.toISOString(),
       });
       return;
@@ -908,6 +990,8 @@ router.post("/thoughts/:id/react", reactRateLimit, async (req, res) => {
       mood: updated.mood,
       feltThisCount: updated.feltThisCount,
       madeThinkCount: updated.madeThinkCount,
+      reactionCount: updated.feltThisCount + updated.madeThinkCount,
+      hasReactions: updated.feltThisCount + updated.madeThinkCount > 0,
       createdAt: updated.createdAt.toISOString(),
     });
   } catch (err: any) {
@@ -916,7 +1000,11 @@ router.post("/thoughts/:id/react", reactRateLimit, async (req, res) => {
   }
 });
 
-const VALID_REPORT_CATEGORIES = ["harmful", "abusive", "inappropriate"] as const;
+const VALID_REPORT_CATEGORIES = [
+  "harmful",
+  "abusive",
+  "inappropriate",
+] as const;
 type ReportCategory = (typeof VALID_REPORT_CATEGORIES)[number];
 
 router.post("/thoughts/:id/report", reportRateLimit, async (req, res) => {
