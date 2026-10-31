@@ -249,14 +249,66 @@ async function ensureSeedThoughts() {
   }
 }
 
+async function assertProductionSchemaReady() {
+  // Do not create, alter, seed or repair tables during production startup.
+  // The operator must apply reviewed migrations separately after a verified backup.
+  const requiredColumns = {
+    anonymous_users: ["id", "created_at", "last_seen_at"],
+    thoughts: [
+      "id", "user_id", "content", "mood", "category",
+      "felt_this_count", "made_think_count", "created_at", "updated_at",
+      "moderation_status", "moderation_reason", "moderation_updated_at",
+      "moderation_rule_version", "moderation_audit_id",
+    ],
+    receives: ["id", "user_id", "thought_id", "received_at"],
+    reactions: ["id", "user_id", "thought_id", "reaction_type", "created_at"],
+    daily_thought_selections: [
+      "date_utc", "thought_id", "selected_at", "algorithm_version",
+      "selection_mode", "requester_excluded", "audit_metadata",
+    ],
+  } as const;
+
+  const result = await db.execute(sql<{
+    table_name: string;
+    column_name: string;
+  }>`
+    SELECT table_name, column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name IN (
+        'anonymous_users', 'thoughts', 'receives', 'reactions',
+        'daily_thought_selections'
+      )
+  `);
+
+  const actual = new Set(
+    result.rows.map((row) => `${row.table_name}.${row.column_name}`),
+  );
+  const missing = Object.entries(requiredColumns).flatMap(([table, columns]) =>
+    columns
+      .filter((column) => !actual.has(`${table}.${column}`))
+      .map((column) => `${table}.${column}`),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `Production schema validation failed (missing: ${missing.join(", ")}). ` +
+      "Apply verified migrations separately; startup has not modified the database.",
+    );
+  }
+}
+
 async function bootstrap() {
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL must be set before starting the API server.");
   }
 
   assertProductionReadiness();
-  await ensureDatabaseSchema();
-  await ensureSeedThoughts();
+  if (process.env.NODE_ENV === "production") {
+    await assertProductionSchemaReady();
+  } else {
+    await ensureDatabaseSchema();
+    await ensureSeedThoughts();
+  }
 }
 
 const port = Number(process.env.PORT || 3001);
