@@ -1,0 +1,34 @@
+name: Into the Void encrypted offsite backup
+
+on:
+  schedule:
+    - cron: '17 4 * * *' # UTC; off peak and away from top of hour
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: into-the-void-encrypted-database-backup
+  cancel-in-progress: false
+
+jobs:
+  encrypted-backup:
+    # Fail closed: explicit enablement after credentials and first restore test.
+    if: ${{ vars.ITV_BACKUP_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04
+    container: postgres:17-bookworm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install encryption and Drive tools
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends age rclone ca-certificates
+      - name: Encrypt stream, upload offsite, download and verify SHA-256
+        shell: bash
+        env:
+          ITV_NEON_READONLY_URL: ${{ secrets.ITV_NEON_READONLY_URL }}
+          ITV_AGE_RECIPIENT: ${{ vars.ITV_AGE_RECIPIENT }}
+          ITV_RCLONE_CONFIG_B64: ${{ secrets.ITV_RCLONE_CONFIG_B64 }}
+        run: bash scripts/backup/itv-offsite-backup.sh
