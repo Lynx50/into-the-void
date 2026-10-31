@@ -1,0 +1,68 @@
+name: Into the Void synthetic backup and restore acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/backup/**'
+      - '.github/workflows/itv-*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  synthetic-roundtrip:
+    runs-on: ubuntu-24.04
+    container: postgres:17-bookworm
+    timeout-minutes: 15
+    services:
+      fixture-postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_PASSWORD: synthetic-test-only
+          POSTGRES_DB: itv_fixture
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      PGPASSWORD: synthetic-test-only
+      PGHOST: fixture-postgres
+      PGUSER: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install encryption and offsite tools
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends age rclone ca-certificates
+      - name: Validate syntax and perform synthetic encrypted export/restore
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash -n scripts/backup/itv-offsite-backup.sh scripts/backup/itv-restore-test.sh
+          psql -d itv_fixture -v ON_ERROR_STOP=1 -q <<'SQL'
+          CREATE TABLE synthetic_data (id integer PRIMARY KEY, sample text NOT NULL);
+          INSERT INTO synthetic_data VALUES (1,'synthetic-only'), (2,'no-real-thoughts');
+          SQL
+          temp="$(mktemp -d)"
+          trap 'rm -rf -- "$temp"; rm -rf -- IntoTheVoid-Encrypted-Backups' EXIT
+          age-keygen -o "$temp/identity.txt" >/dev/null 2>&1
+          recipient="$(age-keygen -y "$temp/identity.txt")"
+          cat > "$temp/rclone.conf" <<'EOF'
+          [itvdrive]
+          type = local
+          scope = drive.file
+          EOF
+          export ITV_NEON_READONLY_URL='postgresql://postgres:synthetic-test-only@fixture-postgres:5432/itv_fixture'
+          export ITV_AGE_RECIPIENT="$recipient"
+          export ITV_RCLONE_CONFIG_B64="$(base64 -w 0 "$temp/rclone.conf")"
+          bash scripts/backup/itv-offsite-backup.sh
+          archive="$(find IntoTheVoid-Encrypted-Backups -name '*.dump.age' -type f -print -quit)"
+          test -n "$archive"
+          bash scripts/backup/itv-restore-test.sh "$archive" "$temp/identity.txt"
+          createdb itv_fixture_restored
+          age -d -i "$temp/identity.txt" "$archive" | pg_restore --dbname=itv_fixture_restored --no-owner --no-acl --exit-on-error > /dev/null
+          rows="$(psql -d itv_fixture_restored -Atc 'SELECT count(*) FROM synthetic_data')"
+          test "$rows" = 2
+          echo 'PASS: encrypted backup, rclone upload/download, decrypted catalog and full synthetic restore'
