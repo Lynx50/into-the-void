@@ -150,7 +150,16 @@ export async function apiFetch<T>(
 
     if (!response.ok) {
       if (response.status === 401 && !options?.skipSession) {
-        clearSessionToken();
+        // A request from the previous session can finish after reconnection.
+        // Only invalidate the token this request actually sent; a late 401
+        // must not erase a newer session installed while it was in flight.
+        const requestSessionToken = headers.get(SESSION_HEADER);
+        if (
+          requestSessionToken &&
+          getStoredAnonymousSession()?.sessionToken === requestSessionToken
+        ) {
+          clearSessionToken();
+        }
       }
 
       throw {
