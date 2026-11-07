@@ -7,6 +7,7 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -107,3 +108,63 @@ export const reactionsTable = pgTable("reactions", {
 });
 
 export type Reaction = typeof reactionsTable.$inferSelect;
+
+export const notificationDevicesTable = pgTable(
+  "notification_devices",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    token: text("token").notNull(),
+    platform: text("platform").notNull().default("android"),
+    voidNotificationsEnabled: boolean("void_notifications_enabled")
+      .notNull()
+      .default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [uniqueIndex("notification_devices_token_unique").on(table.token)],
+);
+
+export const reactionNotificationDeliveriesTable = pgTable(
+  "reaction_notification_deliveries",
+  {
+    id: serial("id").primaryKey(),
+    reactionId: integer("reaction_id")
+      .notNull()
+      .references(() => reactionsTable.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("reaction_notification_delivery_reaction_unique").on(
+      table.reactionId,
+    ),
+  ],
+);
+
+export const thoughtDeliveryNotificationDeliveriesTable = pgTable(
+  "thought_delivery_notification_deliveries",
+  {
+    id: serial("id").primaryKey(),
+    receiveId: integer("receive_id")
+      .notNull()
+      .references(() => receivesTable.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("thought_delivery_notification_receive_unique").on(
+      table.receiveId,
+    ),
+  ],
+);

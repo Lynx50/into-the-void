@@ -33,6 +33,11 @@ import {
   isObviousSubmissionJunk,
 } from "../lib/content-safety";
 import { buildPublicDailyThoughtResponse } from "../lib/daily-thought-selection";
+import {
+  sendReactionNotification,
+  sendThoughtReachedNotification,
+  type PositiveReactionType,
+} from "../lib/reaction-notifications";
 
 const router: IRouter = Router();
 
@@ -236,6 +241,35 @@ async function getUserThoughtCounts(userId: string): Promise<{
     totalThoughts: Number(totalResult?.count ?? 0),
     thoughtsToday: Number(todayResult?.count ?? 0),
   };
+}
+
+async function recordThoughtReceived(
+  userId: string,
+  thoughtId: number,
+): Promise<{ id: number } | null> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`${userId}:${thoughtId}`}))`,
+    );
+
+    const [existing] = await tx
+      .select({ id: receivesTable.id })
+      .from(receivesTable)
+      .where(
+        and(
+          eq(receivesTable.userId, userId),
+          eq(receivesTable.thoughtId, thoughtId),
+        ),
+      )
+      .limit(1);
+    if (existing) return null;
+
+    const [received] = await tx
+      .insert(receivesTable)
+      .values({ userId, thoughtId, receivedAt: new Date() })
+      .returning({ id: receivesTable.id });
+    return received;
+  });
 }
 
 function buildEligibleThoughtPredicates(
@@ -528,28 +562,21 @@ router.post("/thoughts/receive", receiveRateLimit, async (req, res) => {
       return;
     }
 
-    const [existingReceive] = await db
-      .select({ thoughtId: receivesTable.thoughtId })
-      .from(receivesTable)
-      .where(
-        and(
-          eq(receivesTable.userId, userId),
-          eq(receivesTable.thoughtId, thought.id),
-        ),
-      )
-      .limit(1);
-
-    if (existingReceive) {
+    const receive = await recordThoughtReceived(userId, thought.id);
+    if (!receive) {
       res.status(404).json({
         error: "The void is quiet right now. Try again soon.",
       });
       return;
     }
 
-    await db.insert(receivesTable).values({
-      userId,
-      thoughtId: thought.id,
-      receivedAt: new Date(),
+    void sendThoughtReachedNotification({
+      receiveId: receive.id,
+      thoughtOwnerId: thought.userId,
+      recipientId: userId,
+      isGenuineUserThought: thought.source === "user",
+    }).catch(() => {
+      // Receive success must never depend on optional push delivery.
     });
 
     res.json({
@@ -736,10 +763,19 @@ router.post("/thoughts/receive-claim", receiveRateLimit, async (req, res) => {
       return;
     }
 
-    await db.insert(receivesTable).values({
-      userId,
-      thoughtId: thought.id,
-      receivedAt: new Date(),
+    const receive = await recordThoughtReceived(userId, thought.id);
+    if (!receive) {
+      res.status(409).json({ error: "Thought already received." });
+      return;
+    }
+
+    void sendThoughtReachedNotification({
+      receiveId: receive.id,
+      thoughtOwnerId: thought.userId,
+      recipientId: userId,
+      isGenuineUserThought: thought.userId !== SEED_USER_ID,
+    }).catch(() => {
+      // Claim success must never depend on optional push delivery.
     });
 
     res.json({
@@ -912,76 +948,85 @@ router.post("/thoughts/:id/react", reactRateLimit, async (req, res) => {
   try {
     await ensureAnonymousUser(userId);
 
-    const [thought] = await db
-      .select({
-        id: thoughtsTable.id,
-        userId: thoughtsTable.userId,
-        content: thoughtsTable.content,
-        mood: thoughtsTable.mood,
-        feltThisCount: thoughtsTable.feltThisCount,
-        madeThinkCount: thoughtsTable.madeThinkCount,
-        createdAt: thoughtsTable.createdAt,
-      })
-      .from(thoughtsTable)
-      .where(eq(thoughtsTable.id, id));
+    const result = await db.transaction(async (tx) => {
+      const reactionLockKey = `${userId}:${id}:${reactionType}`;
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${reactionLockKey}))`,
+      );
 
-    if (!thought) {
+      const [thought] = await tx
+        .select({
+          id: thoughtsTable.id,
+          userId: thoughtsTable.userId,
+          content: thoughtsTable.content,
+          mood: thoughtsTable.mood,
+          feltThisCount: thoughtsTable.feltThisCount,
+          madeThinkCount: thoughtsTable.madeThinkCount,
+          createdAt: thoughtsTable.createdAt,
+        })
+        .from(thoughtsTable)
+        .where(eq(thoughtsTable.id, id));
+
+      if (!thought) return null;
+
+      const [existing] = await tx
+        .select({ id: reactionsTable.id })
+        .from(reactionsTable)
+        .where(
+          and(
+            eq(reactionsTable.userId, userId),
+            eq(reactionsTable.thoughtId, id),
+            eq(reactionsTable.reactionType, reactionType),
+          ),
+        )
+        .limit(1);
+
+      if (existing) return { thought, reactionId: null };
+
+      const [reaction] = await tx
+        .insert(reactionsTable)
+        .values({ userId, thoughtId: id, reactionType })
+        .returning({ id: reactionsTable.id });
+
+      const increment =
+        reactionType === "felt_this"
+          ? { feltThisCount: sql<number>`${thoughtsTable.feltThisCount} + 1` }
+          : { madeThinkCount: sql<number>`${thoughtsTable.madeThinkCount} + 1` };
+
+      const [updated] = await tx
+        .update(thoughtsTable)
+        .set(increment)
+        .where(eq(thoughtsTable.id, id))
+        .returning({
+          id: thoughtsTable.id,
+          userId: thoughtsTable.userId,
+          content: thoughtsTable.content,
+          mood: thoughtsTable.mood,
+          feltThisCount: thoughtsTable.feltThisCount,
+          madeThinkCount: thoughtsTable.madeThinkCount,
+          createdAt: thoughtsTable.createdAt,
+        });
+
+      return { thought: updated, reactionId: reaction.id };
+    });
+
+    if (!result) {
       res.status(404).json({ error: "Thought not found" });
       return;
     }
 
-    const existing = await db
-      .select()
-      .from(reactionsTable)
-      .where(
-        and(
-          eq(reactionsTable.userId, userId),
-          eq(reactionsTable.thoughtId, id),
-          eq(reactionsTable.reactionType, reactionType),
-        ),
-      );
+    const updated = result.thought;
 
-    if (existing.length > 0) {
-      res.json({
-        id: thought.id,
-        userId: thought.userId,
-        content: thought.content,
-        mood: thought.mood,
-        feltThisCount: thought.feltThisCount,
-        madeThinkCount: thought.madeThinkCount,
-        reactionCount: thought.feltThisCount + thought.madeThinkCount,
-        hasReactions: thought.feltThisCount + thought.madeThinkCount > 0,
-        createdAt: thought.createdAt.toISOString(),
+    if (result.reactionId && updated.userId !== userId) {
+      void sendReactionNotification({
+        reactionId: result.reactionId,
+        reactionType: reactionType as PositiveReactionType,
+        thoughtOwnerId: updated.userId,
+        reactorId: userId,
+      }).catch(() => {
+        // Reaction success must never depend on optional push delivery.
       });
-      return;
     }
-
-    await db.insert(reactionsTable).values({
-      userId,
-      thoughtId: id,
-      reactionType,
-    });
-
-    const updates: { feltThisCount?: number; madeThinkCount?: number } = {};
-    if (reactionType === "felt_this") {
-      updates.feltThisCount = thought.feltThisCount + 1;
-    } else if (reactionType === "made_think") {
-      updates.madeThinkCount = thought.madeThinkCount + 1;
-    }
-
-    const [updated] = await db
-      .update(thoughtsTable)
-      .set(updates)
-      .where(eq(thoughtsTable.id, id))
-      .returning({
-        id: thoughtsTable.id,
-        userId: thoughtsTable.userId,
-        content: thoughtsTable.content,
-        mood: thoughtsTable.mood,
-        feltThisCount: thoughtsTable.feltThisCount,
-        madeThinkCount: thoughtsTable.madeThinkCount,
-        createdAt: thoughtsTable.createdAt,
-      });
 
     res.json({
       id: updated.id,

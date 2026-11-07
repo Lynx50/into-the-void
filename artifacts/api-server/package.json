@@ -8,7 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --env-file=.env --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --experimental-strip-types src/lib/thought-selection.test.ts src/lib/daily-thought-selection.test.ts src/lib/daily-thought-contract.test.ts src/lib/content-safety.test.ts scripts/audit-classifier.test.mjs scripts/monthly-moderation.test.mjs"
+    "test": "node --test --experimental-strip-types src/lib/thought-selection.test.ts src/lib/daily-thought-selection.test.ts src/lib/daily-thought-contract.test.ts src/lib/content-safety.test.ts src/lib/reaction-notifications.test.ts scripts/audit-classifier.test.mjs scripts/monthly-moderation.test.mjs"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",
@@ -17,6 +17,7 @@
     "cors": "^2",
     "drizzle-orm": "catalog:",
     "express": "^5",
+    "firebase-admin": "^13.10.0",
     "pg": "^8.20.0",
     "pino": "^9",
     "pino-http": "^10"
