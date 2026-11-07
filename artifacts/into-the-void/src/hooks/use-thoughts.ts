@@ -847,7 +847,8 @@ export function useSubmitThought() {
       });
     },
     onSuccess: async (_data, variables) => {
-      await trackEvent("thought_released", {
+      // Best-effort telemetry must not delay cache updates or mutation completion.
+      void trackEvent("thought_released", {
         has_mood: Boolean(variables?.data?.mood),
       });
 
@@ -917,7 +918,7 @@ export function useReceiveThought() {
         queryKey: ["receive-count", currentUserId],
       });
 
-      await trackEvent("thought_received", {
+      void trackEvent("thought_received", {
         source: typeof thought.id === "number" ? "server" : "unknown",
         has_mood: Boolean(thought.mood),
       });
@@ -973,7 +974,7 @@ export function useClaimReceivedThought() {
         queryKey: ["receive-count", currentUserId],
       });
 
-      await trackEvent("thought_received", {
+      void trackEvent("thought_received", {
         source: "preloaded",
         has_mood: Boolean(thought.mood),
       });
@@ -993,7 +994,7 @@ export function useReactToThought() {
       const reactionType =
         variables?.data?.reactionType ?? variables?.data?.type ?? "unknown";
 
-      await trackEvent("thought_reaction", {
+      void trackEvent("thought_reaction", {
         type: String(reactionType),
       });
     },
